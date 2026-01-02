@@ -1,97 +1,77 @@
 package com.example.agproject
 
 import android.Manifest
-import android.annotation.SuppressLint
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothManager
-import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanResult
-import android.bluetooth.le.ScanSettings
-import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 
 class MainActivity : AppCompatActivity() {
 
-  private lateinit var deviceAdapter: DeviceAdapter
-  private var bluetoothAdapter: BluetoothAdapter? = null
-  private var isScanning = false
+  private var isRunning = false
+  private var targetAddress: String? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
 
-    // 블루투스 매니저 가져오기
-    val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-    bluetoothAdapter = bluetoothManager.adapter
+    val btnToggle = findViewById<Button>(R.id.btnToggle)
+    val btnSearch = findViewById<ImageButton>(R.id.btnSearch)
+    val tvStatus = findViewById<TextView>(R.id.tvStatus)
 
-    // 리스트(RecyclerView) 설정
-    val recyclerView = findViewById<RecyclerView>(R.id.recyclerView)
-    recyclerView.layoutManager = LinearLayoutManager(this)
-
-    // 어댑터 연결 (아이템 클릭 시 동작 정의)
-    deviceAdapter = DeviceAdapter { device ->
-      connectToDevice(device)
-    }
-    recyclerView.adapter = deviceAdapter
-
-    // 버튼 이벤트
-    findViewById<Button>(R.id.btnScan).setOnClickListener {
-      if (isScanning) {
-        stopScan()
-      } else {
-        startScan()
-      }
-    }
-
-    // 권한 요청 (앱 켜자마자)
+    // 1. 권한 체크
     checkPermissions()
+
+    // 2. START / STOP 버튼 클릭
+    btnToggle.setOnClickListener {
+      if (isRunning) {
+        // STOP 기능
+        stopSystem()
+        btnToggle.text = "START"
+        btnToggle.background.setTint(Color.parseColor("#2196F3")) // 파란색
+        tvStatus.text = "시스템 대기 중"
+        tvStatus.setTextColor(Color.parseColor("#999999"))
+      } else {
+        // START 기능
+        // 저장된 주소가 있는지 확인
+        loadSavedAddress()
+        if (targetAddress == null) {
+          Toast.makeText(this, "먼저 돋보기 버튼을 눌러 기기를 등록해주세요!", Toast.LENGTH_LONG).show()
+          return@setOnClickListener
+        }
+
+        startSystem()
+        btnToggle.text = "STOP"
+        btnToggle.background.setTint(Color.parseColor("#F44336")) // 빨간색
+        tvStatus.text = "페달 오인 감지 중..."
+        tvStatus.setTextColor(Color.parseColor("#F44336")) // 빨간 글씨
+      }
+      isRunning = !isRunning
+    }
+
+    // 3. 돋보기(검색) 버튼 클릭 -> 검색 화면으로 이동
+    btnSearch.setOnClickListener {
+      val intent = Intent(this, ScanActivity::class.java)
+      startActivity(intent)
+    }
   }
 
-  @SuppressLint("MissingPermission")
-  private fun startScan() {
-    if (!hasPermissions()) return
-
-    deviceAdapter.clear() // 목록 초기화
-    isScanning = true
-    updateStatus("주변 기기 검색 중...")
-    findViewById<Button>(R.id.btnScan).text = "검색 중단"
-
-    // 스캔 시작 (빈 필터 = 모든 기기 검색)
-    bluetoothAdapter?.bluetoothLeScanner?.startScan(null, scanSettings(), scanCallback)
+  private fun loadSavedAddress() {
+    val prefs: SharedPreferences = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    targetAddress = prefs.getString("TARGET_ADDRESS", null)
   }
 
-  @SuppressLint("MissingPermission")
-  private fun stopScan() {
-    if (!hasPermissions()) return
-
-    isScanning = false
-    updateStatus("검색 완료. 기기를 선택하세요.")
-    findViewById<Button>(R.id.btnScan).text = "🔍 주변 기기 검색"
-
-    bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
-  }
-
-  // 기기를 터치했을 때 실행되는 함수
-  @SuppressLint("MissingPermission")
-  private fun connectToDevice(device: BluetoothDevice) {
-    stopScan() // 연결하려면 스캔 멈춰야 함
-
-    Toast.makeText(this, "${device.name}에 연결을 시도합니다.", Toast.LENGTH_SHORT).show()
-
-    // 서비스 시작 (선택한 기기의 주소를 담아서 보냄!)
+  private fun startSystem() {
     val serviceIntent = Intent(this, BleService::class.java)
-    serviceIntent.putExtra("TARGET_ADDRESS", device.address)
+    serviceIntent.putExtra("TARGET_ADDRESS", targetAddress) // 저장된 주소 전달
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       startForegroundService(serviceIntent)
@@ -100,32 +80,9 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
-  // 스캔 결과 받는 콜백
-  private val scanCallback = object : ScanCallback() {
-    override fun onScanResult(callbackType: Int, result: ScanResult?) {
-      result?.device?.let { device ->
-        // 리스트에 추가 (어댑터가 알아서 화면 갱신)
-        deviceAdapter.addDevice(device)
-      }
-    }
-  }
-
-  private fun scanSettings(): ScanSettings {
-    return ScanSettings.Builder()
-      .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-      .build()
-  }
-
-  private fun updateStatus(text: String) {
-    findViewById<TextView>(R.id.tvStatus).text = text
-  }
-
-  // --- 권한 관련 (기존과 동일) ---
-  private fun hasPermissions(): Boolean {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-      return ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
-    }
-    return true
+  private fun stopSystem() {
+    val serviceIntent = Intent(this, BleService::class.java)
+    stopService(serviceIntent)
   }
 
   private fun checkPermissions() {
