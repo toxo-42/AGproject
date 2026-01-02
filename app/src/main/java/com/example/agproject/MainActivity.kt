@@ -1,105 +1,143 @@
 package com.example.agproject
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Button
+import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
-import com.example.agproject.databinding.ActivityMainBinding
-
-
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 
 class MainActivity : AppCompatActivity() {
 
-  private lateinit var binding: ActivityMainBinding
-
-  // 권한 요청 결과를 처리하는 런처 (사용자가 '허용'을 눌렀는지 확인)
-  private val requestPermissionLauncher =
-    registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-      // 모든 권한이 허용되었는지 확인
-      val allGranted = permissions.entries.all { it.value }
-      if (allGranted) {
-        // 권한을 다 얻었으면 서비스 시작
-        startBleService()
-      } else {
-        Toast.makeText(this, "모든 권한을 허용해야 앱을 사용할 수 있습니다.", Toast.LENGTH_SHORT).show()
-      }
-    }
+  private lateinit var deviceAdapter: DeviceAdapter
+  private var bluetoothAdapter: BluetoothAdapter? = null
+  private var isScanning = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    binding = ActivityMainBinding.inflate(layoutInflater)
-    setContentView(binding.root)
+    setContentView(R.layout.activity_main)
 
-    binding.btnToggleService.setOnClickListener {
-      if (binding.btnToggleService.text == "START") {
-        // START 버튼을 누르면 -> 권한부터 체크!
-        checkPermissionsAndStart()
+    // 블루투스 매니저 가져오기
+    val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+    bluetoothAdapter = bluetoothManager.adapter
+
+    // 리스트(RecyclerView) 설정
+    val recyclerView = findViewById<RecyclerView>(R.id.recyclerView)
+    recyclerView.layoutManager = LinearLayoutManager(this)
+
+    // 어댑터 연결 (아이템 클릭 시 동작 정의)
+    deviceAdapter = DeviceAdapter { device ->
+      connectToDevice(device)
+    }
+    recyclerView.adapter = deviceAdapter
+
+    // 버튼 이벤트
+    findViewById<Button>(R.id.btnScan).setOnClickListener {
+      if (isScanning) {
+        stopScan()
       } else {
-        // STOP 버튼을 누르면 -> 서비스 종료
-        stopBleService()
+        startScan()
+      }
+    }
+
+    // 권한 요청 (앱 켜자마자)
+    checkPermissions()
+  }
+
+  @SuppressLint("MissingPermission")
+  private fun startScan() {
+    if (!hasPermissions()) return
+
+    deviceAdapter.clear() // 목록 초기화
+    isScanning = true
+    updateStatus("주변 기기 검색 중...")
+    findViewById<Button>(R.id.btnScan).text = "검색 중단"
+
+    // 스캔 시작 (빈 필터 = 모든 기기 검색)
+    bluetoothAdapter?.bluetoothLeScanner?.startScan(null, scanSettings(), scanCallback)
+  }
+
+  @SuppressLint("MissingPermission")
+  private fun stopScan() {
+    if (!hasPermissions()) return
+
+    isScanning = false
+    updateStatus("검색 완료. 기기를 선택하세요.")
+    findViewById<Button>(R.id.btnScan).text = "🔍 주변 기기 검색"
+
+    bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
+  }
+
+  // 기기를 터치했을 때 실행되는 함수
+  @SuppressLint("MissingPermission")
+  private fun connectToDevice(device: BluetoothDevice) {
+    stopScan() // 연결하려면 스캔 멈춰야 함
+
+    Toast.makeText(this, "${device.name}에 연결을 시도합니다.", Toast.LENGTH_SHORT).show()
+
+    // 서비스 시작 (선택한 기기의 주소를 담아서 보냄!)
+    val serviceIntent = Intent(this, BleService::class.java)
+    serviceIntent.putExtra("TARGET_ADDRESS", device.address)
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      startForegroundService(serviceIntent)
+    } else {
+      startService(serviceIntent)
+    }
+  }
+
+  // 스캔 결과 받는 콜백
+  private val scanCallback = object : ScanCallback() {
+    override fun onScanResult(callbackType: Int, result: ScanResult?) {
+      result?.device?.let { device ->
+        // 리스트에 추가 (어댑터가 알아서 화면 갱신)
+        deviceAdapter.addDevice(device)
       }
     }
   }
 
-  // 1. 권한 확인 및 요청 함수
-  private fun checkPermissionsAndStart() {
-    // 필요한 권한 목록 작성 (안드로이드 버전에 따라 다름)
-    val requiredPermissions = mutableListOf<String>()
+  private fun scanSettings(): ScanSettings {
+    return ScanSettings.Builder()
+      .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+      .build()
+  }
 
-    // 안드로이드 12 (S) 이상: 블루투스 스캔/연결 권한 필수
+  private fun updateStatus(text: String) {
+    findViewById<TextView>(R.id.tvStatus).text = text
+  }
+
+  // --- 권한 관련 (기존과 동일) ---
+  private fun hasPermissions(): Boolean {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-      requiredPermissions.add(Manifest.permission.BLUETOOTH_SCAN)
-      requiredPermissions.add(Manifest.permission.BLUETOOTH_CONNECT)
-    } else {
-      // 안드로이드 11 이하: 위치 권한 필수 (블루투스 사용을 위해)
-      requiredPermissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+      return ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
     }
-
-    // 안드로이드 13 (T) 이상: 알림 권한 필수
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      requiredPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
-    }
-
-    // 권한이 없는게 하나라도 있는지 확인
-    val missingPermissions = requiredPermissions.filter {
-      ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-    }
-
-    if (missingPermissions.isEmpty()) {
-      // 모든 권한이 이미 있다면 바로 시작
-      startBleService()
-    } else {
-      // 없는 권한이 있다면 팝업 띄워서 요청
-      requestPermissionLauncher.launch(missingPermissions.toTypedArray())
-    }
+    return true
   }
 
-  // 2. 서비스 시작 (UI 변경 + 서비스 호출)
-  private fun startBleService() {
-    binding.btnToggleService.text = "STOP"
-    binding.tvStatus.text = "감시 시스템 가동 중..."
-
-    val intent = Intent(this, BleService::class.java)
-    // 안드로이드 8.0 이상은 startForegroundService 사용
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      startForegroundService(intent)
+  private fun checkPermissions() {
+    val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      arrayOf(
+        Manifest.permission.BLUETOOTH_SCAN,
+        Manifest.permission.BLUETOOTH_CONNECT,
+        Manifest.permission.ACCESS_FINE_LOCATION
+      )
     } else {
-      startService(intent)
+      arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
     }
-  }
-
-  // 3. 서비스 종료
-  private fun stopBleService() {
-    binding.btnToggleService.text = "START"
-    binding.tvStatus.text = "Accu Guard 준비 완료"
-
-    val intent = Intent(this, BleService::class.java)
-    stopService(intent)
+    ActivityCompat.requestPermissions(this, permissions, 1)
   }
 }
