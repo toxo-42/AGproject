@@ -30,7 +30,7 @@ class BleService : Service() {
     // 1. 알림(Notification) 생성
     val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
       .setContentTitle("AG Guard")
-      .setContentText("백그라운드 감시 중입니다...")
+      .setContentText("페달 조작 감시 중...")
       .setSmallIcon(android.R.drawable.ic_dialog_info) // 기본 아이콘 사용
       .setOngoing(true) // 사용자가 알림을 못 지우게 설정
       .build()
