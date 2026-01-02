@@ -57,10 +57,20 @@ class MainActivity : AppCompatActivity() {
       isRunning = !isRunning
     }
 
-    // 3. 돋보기(검색) 버튼 클릭 -> 검색 화면으로 이동
+    // 돋보기 버튼 클릭 로직
     btnSearch.setOnClickListener {
-      val intent = Intent(this, ScanActivity::class.java)
-      startActivity(intent)
+      val prefs: SharedPreferences = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+      val savedAddress = prefs.getString("TARGET_ADDRESS", null)
+
+      if (savedAddress != null) {
+        // 저장된 기기가 있으면 -> [관리 페이지]로 이동
+        val intent = Intent(this, DeviceManagerActivity::class.java)
+        startActivity(intent)
+      } else {
+        // 저장된 기기가 없으면 -> [검색 페이지]로 이동
+        val intent = Intent(this, ScanActivity::class.java)
+        startActivity(intent)
+      }
     }
   }
 

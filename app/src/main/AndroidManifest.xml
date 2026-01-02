@@ -41,6 +41,8 @@
 
         <activity android:name=".ScanActivity" />
 
+        <activity android:name=".DeviceManagerActivity" />
+
         <service
             android:name=".BleService"
             android:foregroundServiceType="connectedDevice"

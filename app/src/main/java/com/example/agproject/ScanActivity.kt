@@ -52,13 +52,16 @@ class ScanActivity : AppCompatActivity() {
 
   @SuppressLint("MissingPermission")
   private fun saveDeviceAndFinish(device: BluetoothDevice) {
-    // 1. 선택한 기기 주소를 '영구 저장' (앱 껐다 켜도 기억함)
     val prefs: SharedPreferences = getSharedPreferences("AgPrefs", MODE_PRIVATE)
-    prefs.edit().putString("TARGET_ADDRESS", device.address).apply()
+    val editor = prefs.edit()
+
+    //주소, 이름도 같이 저장
+    editor.putString("TARGET_ADDRESS", device.address)
+    editor.putString("TARGET_NAME", device.name ?: "이름 없음") // 이름이 없으면 '이름 없음' 저장
+    editor.apply()
 
     Toast.makeText(this, "${device.name} 기기가 등록되었습니다.", Toast.LENGTH_SHORT).show()
 
-    // 2. 스캔 중단 및 창 닫기
     bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
     finish()
   }
