@@ -1,3 +1,33 @@
 <resources>
-  <string name="app_name">AGproject</string>
+  <string name="app_name">AG Guard</string>
+
+  <string name="app_title">AG GUARD SYSTEM</string>
+  <string name="app_subtitle">Background Safety Monitor</string>
+  <string name="label_current_target">CURRENT TARGET</string>
+  <string name="no_device_registered">등록된 기기 없음</string>
+  <string name="register_prompt">먼저 기기를 등록해주세요</string>
+  <string name="btn_scan">기기 검색 (Scan)</string>
+  <string name="btn_manage">설정 (Manage)</string>
+
+  <string name="title_scan">Device Scan</string>
+  <string name="unknown_device">Unknown Device</string>
+  <string name="default_mac">00:00:00:00:00:00</string>
+  <string name="btn_connect">Connect</string>
+  <string name="scan_completed">스캔 완료</string>
+  <string name="permission_required">권한이 필요합니다.</string>
+  <string name="device_selected">선택됨</string>
+
+  <string name="title_manager">Device Manager</string>
+  <string name="label_device_name">DEVICE NAME</string>
+  <string name="default_module_name">AG_Test_Module</string>
+  <string name="label_mac_address">MAC ADDRESS</string>
+  <string name="label_status">STATUS</string>
+  <string name="status_monitoring">Active / Monitoring</string>
+  <string name="status_no_device">⚠️ 연결된 기기가 없습니다.</string>
+  <string name="status_connected">✅ 현재 등록되어 감시 대기 중입니다.</string>
+  <string name="btn_disconnect">연결 해제 (Disconnect)</string>
+  <string name="msg_disconnected">기기 등록이 해제되었습니다.</string>
+
+  <string name="desc_back_button">뒤로 가기</string>
+  <string name="desc_device_icon">기기 아이콘</string>
 </resources>
