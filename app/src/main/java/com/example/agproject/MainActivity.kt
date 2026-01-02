@@ -12,6 +12,8 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.agproject.databinding.ActivityMainBinding
 
+
+
 class MainActivity : AppCompatActivity() {
 
   private lateinit var binding: ActivityMainBinding

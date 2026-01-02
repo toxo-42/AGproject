@@ -1,69 +1,79 @@
 package com.example.agproject
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothManager
-import android.bluetooth.le.BluetoothLeScanner
-import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanResult
+import android.bluetooth.*
+import android.bluetooth.le.*
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import java.util.*
 
-
-class BleService : Service() {
+class BleService : Service(), TextToSpeech.OnInitListener {
 
   private val CHANNEL_ID = "BleServiceChannel"
-  private val TAG = "BleService" // 로그 필터용 태그
+  private val TAG = "BleService"
 
-  // 블루투스 관련 변수
+  // 👇 [중요] nRF Connect에서 확인한 주소로 매번 바꿔주세요 (테스트용)
+  private val TARGET_ADDRESS = "DA:C9:40:53:C8:06"
   private var bluetoothAdapter: BluetoothAdapter? = null
   private var bluetoothLeScanner: BluetoothLeScanner? = null
+  private var bluetoothGatt: BluetoothGatt? = null
+  private var tts: TextToSpeech? = null
 
   override fun onCreate() {
     super.onCreate()
     createNotificationChannel()
 
-    // 블루투스 매니저 초기화
+    // 블루투스 초기화
     val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     bluetoothAdapter = bluetoothManager.adapter
     bluetoothLeScanner = bluetoothAdapter?.bluetoothLeScanner
+
+    // TTS(음성 안내) 준비
+    tts = TextToSpeech(this, this)
+  }
+
+  // TTS 초기화 완료 시 호출되는 함수
+  override fun onInit(status: Int) {
+    if (status == TextToSpeech.SUCCESS) {
+      val result = tts?.setLanguage(Locale.KOREAN)
+      if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+        Log.e(TAG, "TTS: 한국어 지원 안 함")
+      } else {
+        Log.i(TAG, "TTS: 음성 안내 준비 완료")
+
+        // 👇 [추가] 준비되자마자 바로 말해보기 (테스트용)
+        speakOut("음성 안내 시스템이 정상 작동 중입니다.")
+      }
+    }
   }
 
   @SuppressLint("ForegroundServiceType")
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-
-    // 1. 알림 띄우기 (필수)
-    val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-      .setContentTitle("AG Guard")
-      .setContentText("주변 블루투스 신호를 감시하고 있습니다...")
-      .setSmallIcon(android.R.drawable.ic_dialog_info)
-      .setOngoing(true)
-      .build()
-
-    if (Build.VERSION.SDK_INT >= 34) {
-      startForeground(1, notification,
-        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
-    } else {
-      startForeground(1, notification)
-    }
+    // 1. 알림 띄우기
+    startForegroundServiceNotification("시스템 가동 중... 기기를 찾는 중")
 
     // 2. 스캔 시작
-    startBleScan()
+    startTargetScan()
 
     return START_NOT_STICKY
   }
 
-  // 서비스 종료 시 (STOP 버튼)
   override fun onDestroy() {
-    stopBleScan() // 스캔 중단 (배터리 절약)
+    disconnectGatt()
+    if (tts != null) {
+      tts?.stop()
+      tts?.shutdown()
+    }
     super.onDestroy()
   }
 
@@ -71,57 +81,119 @@ class BleService : Service() {
     return null
   }
 
-  // --- 블루투스 스캔 로직 ---
+  // --- 1. 스캔 (Targeted Scan) ---
+  @SuppressLint("MissingPermission")
+  private fun startTargetScan() {
+    if (bluetoothAdapter == null || !bluetoothAdapter!!.isEnabled) return
 
-  // 스캔 결과를 받는 콜백 (기기 찾기)
+    Log.d(TAG, "🎯 타겟 스캔 시작: $TARGET_ADDRESS")
+
+    val scanSettings = ScanSettings.Builder()
+      .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+      .build()
+
+    // 주소 필터 (이름 필터 대신 이걸 씁니다)
+    val targetFilter = ScanFilter.Builder()
+      .setDeviceAddress(TARGET_ADDRESS)
+      .build()
+
+    val filters = mutableListOf(targetFilter)
+
+    try {
+      bluetoothLeScanner?.startScan(filters, scanSettings, scanCallback)
+    } catch (e: Exception) {
+      Log.e(TAG, "스캔 에러: ${e.message}")
+    }
+  }
+
   private val scanCallback = object : ScanCallback() {
     @SuppressLint("MissingPermission")
     override fun onScanResult(callbackType: Int, result: ScanResult?) {
-      super.onScanResult(callbackType, result)
-
       result?.let {
-        // 찾은 기기 이름과 신호세기(RSSI)를 로그에 출력
-        val deviceName = it.device.name ?: "Unknown"
-        val deviceAddress = it.device.address
-        val rssi = it.rssi
+        Log.i(TAG, "🔥 기기 발견! 연결 시도 중...")
 
-        Log.d(TAG, "발견됨! 이름: $deviceName | 주소: $deviceAddress | 신호: $rssi")
+        // 스캔 중단 (연결을 위해)
+        bluetoothLeScanner?.stopScan(this)
+
+        // 연결 시도
+        connectToDevice(it.device)
       }
     }
 
     override fun onScanFailed(errorCode: Int) {
-      super.onScanFailed(errorCode)
-      Log.e(TAG, "스캔 실패 에러 코드: $errorCode")
+      Log.e(TAG, "❌ 스캔 실패: $errorCode")
     }
   }
 
+  // --- 2. 연결 (Gatt Connect) ---
   @SuppressLint("MissingPermission")
-  private fun startBleScan() {
-    if (bluetoothAdapter == null || !bluetoothAdapter!!.isEnabled) {
-      Log.e(TAG, "블루투스가 꺼져있거나 지원하지 않음")
-      return
+  private fun connectToDevice(device: BluetoothDevice) {
+    // 자동 연결 (autoConnect = false로 해야 빨리 붙음)
+    bluetoothGatt = device.connectGatt(this, false, gattCallback)
+  }
+
+  // --- 3. 연결 상태 콜백 ---
+  private val gattCallback = object : BluetoothGattCallback() {
+    @SuppressLint("MissingPermission")
+    override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
+      if (newState == BluetoothProfile.STATE_CONNECTED) {
+        Log.i(TAG, "✅ [성공] 기기와 연결되었습니다!")
+
+        // 알림 업데이트
+        updateNotification("기기 연결됨 - 모니터링 중")
+
+        // 음성 피드백 (오류 신호 받았다고 가정)
+        speakOut("경고! 오류 신호가 감지되었습니다. 브레이크를 확인하세요.")
+
+      } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+        Log.w(TAG, "🔌 연결 끊김. 다시 스캔합니다.")
+        startTargetScan() // 재연결 시도
+      }
     }
-
-    Log.d(TAG, "블루투스 스캔 시작...")
-    bluetoothLeScanner?.startScan(scanCallback)
   }
 
-  @SuppressLint("MissingPermission")
-  private fun stopBleScan() {
-    Log.d(TAG, "블루투스 스캔 종료")
-    bluetoothLeScanner?.stopScan(scanCallback)
+  // --- 보조 기능 (TTS, 알림) ---
+  private fun speakOut(text: String) {
+    tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "ID")
+    Log.d(TAG, "🗣️ 음성 출력: $text")
   }
 
-  // --- 알림 채널 생성 ---
+  private fun startForegroundServiceNotification(content: String) {
+    val notification = createNotification(content)
+    if (Build.VERSION.SDK_INT >= 34) {
+      startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+    } else {
+      startForeground(1, notification)
+    }
+  }
+
+  private fun updateNotification(content: String) {
+    val notificationManager = getSystemService(NotificationManager::class.java)
+    notificationManager.notify(1, createNotification(content))
+  }
+
+  private fun createNotification(content: String): Notification {
+    return NotificationCompat.Builder(this, CHANNEL_ID)
+      .setContentTitle("AG Guard")
+      .setContentText(content)
+      .setSmallIcon(android.R.drawable.ic_dialog_alert) // 아이콘 변경
+      .setOngoing(true)
+      .build()
+  }
+
   private fun createNotificationChannel() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       val serviceChannel = NotificationChannel(
-        CHANNEL_ID,
-        "AG Guard Service Channel",
-        NotificationManager.IMPORTANCE_LOW
+        CHANNEL_ID, "AG Guard Channel", NotificationManager.IMPORTANCE_LOW
       )
-      val manager = getSystemService(NotificationManager::class.java)
-      manager.createNotificationChannel(serviceChannel)
+      getSystemService(NotificationManager::class.java).createNotificationChannel(serviceChannel)
     }
+  }
+
+  @SuppressLint("MissingPermission")
+  private fun disconnectGatt() {
+    bluetoothGatt?.disconnect()
+    bluetoothGatt?.close()
+    bluetoothGatt = null
   }
 }
