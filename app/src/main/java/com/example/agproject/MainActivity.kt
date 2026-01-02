@@ -27,7 +27,7 @@ class MainActivity : AppCompatActivity() {
     val btnSearch = findViewById<ImageButton>(R.id.btnSearch)
     val tvStatus = findViewById<TextView>(R.id.tvStatus)
 
-    // 1. 권한 체크
+    // 1. [중요] 앱 켜자마자 권한 확인 실행! (이 줄이 있어야 팝업이 뜹니다)
     checkPermissions()
 
     // 2. START / STOP 버튼 클릭
@@ -57,7 +57,7 @@ class MainActivity : AppCompatActivity() {
       isRunning = !isRunning
     }
 
-    // 돋보기 버튼 클릭 로직
+    // 3. 돋보기 버튼 클릭 로직
     btnSearch.setOnClickListener {
       val prefs: SharedPreferences = getSharedPreferences("AgPrefs", MODE_PRIVATE)
       val savedAddress = prefs.getString("TARGET_ADDRESS", null)
@@ -72,6 +72,54 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
       }
     }
+  }
+
+  // --- 권한 관련 함수들 (onCreate 밖으로 잘 뺐습니다!) ---
+
+  // 1. 권한이 있는지 확인하는 함수
+  private fun hasPermissions(): Boolean {
+    // 안드로이드 13 (Tiramisu) 이상일 경우: 알림 권한 체크 추가
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      val hasNotification = ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+      val hasScan = ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+      return hasNotification && hasScan
+    }
+
+    // 안드로이드 12 (S) 이상일 경우
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      return ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+    }
+
+    return true
+  }
+
+  // 2. 권한을 요청하는 함수 (중복 제거됨)
+  private fun checkPermissions() {
+    val permissions = when {
+      // 안드로이드 13 이상: 알림 + 블루투스 + 위치 모두 요청
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+        arrayOf(
+          Manifest.permission.BLUETOOTH_SCAN,
+          Manifest.permission.BLUETOOTH_CONNECT,
+          Manifest.permission.ACCESS_FINE_LOCATION,
+          Manifest.permission.POST_NOTIFICATIONS
+        )
+      }
+      // 안드로이드 12 이상: 블루투스 + 위치
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        arrayOf(
+          Manifest.permission.BLUETOOTH_SCAN,
+          Manifest.permission.BLUETOOTH_CONNECT,
+          Manifest.permission.ACCESS_FINE_LOCATION
+        )
+      }
+      // 안드로이드 11 이하: 위치만
+      else -> {
+        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+      }
+    }
+
+    ActivityCompat.requestPermissions(this, permissions, 1)
   }
 
   private fun loadSavedAddress() {
@@ -93,18 +141,5 @@ class MainActivity : AppCompatActivity() {
   private fun stopSystem() {
     val serviceIntent = Intent(this, BleService::class.java)
     stopService(serviceIntent)
-  }
-
-  private fun checkPermissions() {
-    val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-      arrayOf(
-        Manifest.permission.BLUETOOTH_SCAN,
-        Manifest.permission.BLUETOOTH_CONNECT,
-        Manifest.permission.ACCESS_FINE_LOCATION
-      )
-    } else {
-      arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-    }
-    ActivityCompat.requestPermissions(this, permissions, 1)
   }
 }
