@@ -18,10 +18,10 @@ import java.util.*
 
 class BleService : Service(), TextToSpeech.OnInitListener {
 
-  private val CHANNEL_ID = "BleServiceChannel"
-  private val TAG = "BleService"
+  // 1. 변수 이름을 소문자 시작(camelCase)으로 변경하여 경고 해결
+  private val channelId = "BleServiceChannel"
+  private val tag = "BleService"
 
-  // 👇 이제 하드코딩된 주소는 필요 없습니다! 변수로만 선언합니다.
   private var targetAddress: String? = null
 
   private var bluetoothAdapter: BluetoothAdapter? = null
@@ -46,18 +46,15 @@ class BleService : Service(), TextToSpeech.OnInitListener {
 
   @SuppressLint("ForegroundServiceType")
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    // 👇 메인 화면에서 넘겨준 주소를 여기서 받습니다!
     targetAddress = intent?.getStringExtra("TARGET_ADDRESS")
 
     if (targetAddress == null) {
-      Log.e(TAG, "주소가 전달되지 않았습니다! 서비스를 종료합니다.")
+      Log.e(tag, "주소가 전달되지 않았습니다! 서비스를 종료합니다.")
       stopSelf()
       return START_NOT_STICKY
     }
 
     startForegroundServiceNotification("타겟 감시 중: $targetAddress")
-
-    // 받은 주소로 스캔 시작
     startTargetScan()
 
     return START_NOT_STICKY
@@ -75,13 +72,12 @@ class BleService : Service(), TextToSpeech.OnInitListener {
   private fun startTargetScan() {
     if (bluetoothAdapter == null || !bluetoothAdapter!!.isEnabled) return
 
-    Log.d(TAG, "🎯 타겟 스캔 시작: $targetAddress")
+    Log.d(tag, "타겟 스캔 시작: $targetAddress")
 
     val scanSettings = ScanSettings.Builder()
       .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
       .build()
 
-    // 받아온 주소로 필터 생성
     val targetFilter = ScanFilter.Builder()
       .setDeviceAddress(targetAddress)
       .build()
@@ -91,7 +87,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     try {
       bluetoothLeScanner?.startScan(filters, scanSettings, scanCallback)
     } catch (e: Exception) {
-      Log.e(TAG, "스캔 에러: ${e.message}")
+      Log.e(tag, "스캔 에러: ${e.message}")
     }
   }
 
@@ -99,7 +95,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     @SuppressLint("MissingPermission")
     override fun onScanResult(callbackType: Int, result: ScanResult?) {
       result?.let {
-        Log.i(TAG, "🔥 기기 발견! 연결 시도 중...")
+        Log.i(tag, "기기 발견! 연결 시도 중...")
         bluetoothLeScanner?.stopScan(this)
         connectToDevice(it.device)
       }
@@ -111,16 +107,63 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     bluetoothGatt = device.connectGatt(this, false, gattCallback)
   }
 
+  // 2. Deprecation(구형 코드 사용) 경고를 무시하도록 설정
+  @Suppress("DEPRECATION")
   private val gattCallback = object : BluetoothGattCallback() {
+
     @SuppressLint("MissingPermission")
     override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
       if (newState == BluetoothProfile.STATE_CONNECTED) {
-        Log.i(TAG, "✅ [성공] 기기 연결됨!")
-        updateNotification("기기 연결됨 - 안전 감시 중 🛡️")
-        speakOut("시스템이 연결되었습니다. 안전 운전 하세요.")
+        Log.i(tag, "✅ [성공] 기기 연결됨! 서비스를 탐색합니다...")
+        updateNotification("기기 연결됨 - 데이터 수신 대기 중 📡")
+        gatt?.discoverServices()
       } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-        Log.w(TAG, "🔌 연결 끊김. 재연결 시도...")
+        Log.w(tag, "🔌 연결 끊김. 재연결 시도...")
         startTargetScan()
+      }
+    }
+
+    @SuppressLint("MissingPermission")
+    override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
+      if (status == BluetoothGatt.GATT_SUCCESS) {
+        // 변수 이름 소문자로 변경
+        val serviceUuid = "d74d5c87-3d2b-46b3-b8a8-d64ca491735e"
+        val charUuid = "d74d5c87-3d2b-46b3-b8a8-d64ca491735e"
+
+        val service = gatt?.getService(UUID.fromString(serviceUuid))
+        val characteristic = service?.getCharacteristic(UUID.fromString(charUuid))
+
+        if (characteristic != null) {
+          gatt.setCharacteristicNotification(characteristic, true)
+
+          val descriptor = characteristic.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
+          if (descriptor != null) {
+            // 안드로이드 13(Tiramisu) 분기 처리
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+              gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+            } else {
+              // 구형 방식 (경고 억제됨)
+              descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+              gatt.writeDescriptor(descriptor)
+            }
+          }
+          Log.i(tag, "👂 데이터 수신 모드 활성화 완료 (Notify ON)")
+          speakOut("시스템 가동. 감시를 시작합니다.")
+        } else {
+          Log.e(tag, "❌ 목표 서비스/특성을 찾을 수 없음 (UUID 확인 필요)")
+        }
+      }
+    }
+
+    override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+      // 구형 방식 getStringValue 사용 (경고 억제됨)
+      val receivedData = characteristic.getStringValue(0) ?: ""
+      Log.d(tag, "📩 수신된 데이터: $receivedData")
+
+      if (receivedData.contains("ERR") || receivedData.contains("1")) {
+        Log.e(tag, "🚨 [위험] 페달 오조작 감지됨!")
+        speakOut("위험합니다! 브레이크를 확인하세요!")
+        updateNotification("🚨 경고: 페달 오조작 감지됨!")
       }
     }
   }
@@ -131,6 +174,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
 
   private fun startForegroundServiceNotification(content: String) {
     val notification = createNotification(content)
+    // 3. SDK_INT >= 26 체크 제거 (항상 26 이상이므로)
     if (Build.VERSION.SDK_INT >= 34) {
       startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
     } else {
@@ -144,7 +188,8 @@ class BleService : Service(), TextToSpeech.OnInitListener {
   }
 
   private fun createNotification(content: String): Notification {
-    return NotificationCompat.Builder(this, CHANNEL_ID)
+    // channelId 변수 사용
+    return NotificationCompat.Builder(this, channelId)
       .setContentTitle("AG Guard")
       .setContentText(content)
       .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -154,7 +199,8 @@ class BleService : Service(), TextToSpeech.OnInitListener {
 
   private fun createNotificationChannel() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      val serviceChannel = NotificationChannel(CHANNEL_ID, "AG Guard Channel", NotificationManager.IMPORTANCE_LOW)
+      // channelId 변수 사용
+      val serviceChannel = NotificationChannel(channelId, "AG Guard Channel", NotificationManager.IMPORTANCE_LOW)
       getSystemService(NotificationManager::class.java).createNotificationChannel(serviceChannel)
     }
   }
