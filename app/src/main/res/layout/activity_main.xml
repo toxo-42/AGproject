@@ -1,18 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
-                                                   xmlns:app="http://schemas.android.com/apk/res-auto"
-                                                   android:layout_width="match_parent"
-                                                   android:layout_height="match_parent"
-                                                   android:background="@color/bg_dark"
-                                                   android:padding="20dp">
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_dark"
+    android:padding="20dp">
 
     <TextView
         android:id="@+id/tvAppTitle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginTop="60dp"
+        android:layout_marginStart="4dp"
         android:text="@string/app_title"
         android:textColor="@color/accent_blue"
-        android:textSize="20sp"
+        android:textSize="36sp"
         android:textStyle="bold"
         android:letterSpacing="0.1"
         app:layout_constraintTop_toTopOf="parent"
@@ -21,37 +24,44 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:layout_marginStart="4dp"
         android:text="@string/app_subtitle"
         android:textColor="@color/text_gray"
-        android:textSize="12sp"
+        android:textSize="18sp"
         app:layout_constraintTop_toBottomOf="@id/tvAppTitle"
         app:layout_constraintStart_toStartOf="parent" />
 
+<!--    카드안에 글씨 수정-->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/cardCurrentTarget"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="30dp"
+        android:layout_marginTop="45dp"
+        android:layout_marginHorizontal="@dimen/card_margin_horizontal"
         app:cardBackgroundColor="@color/bg_card"
-        app:cardCornerRadius="16dp"
+        app:cardCornerRadius="@dimen/card_corner_radius"
         app:cardElevation="0dp"
         app:strokeWidth="0dp"
         app:strokeColor="@color/accent_blue"
-        app:layout_constraintTop_toBottomOf="@id/tvAppTitle">
+        app:layout_constraintTop_toBottomOf="@id/tvAppTitle"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintVertical_bias="0.25">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="24dp">
+            android:padding="55dp"
+            android:gravity="center">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/label_current_target"
                 android:textColor="@color/text_gray"
-                android:textSize="12sp"
-                android:textStyle="bold" />
+                android:textSize="15sp"
+                android:textStyle="bold"/>
 
             <TextView
                 android:id="@+id/tvTargetName"
@@ -60,26 +70,29 @@
                 android:layout_marginTop="8dp"
                 android:text="@string/no_device_registered"
                 android:textColor="@color/text_white"
-                android:textSize="24sp"
-                android:textStyle="bold" />
+                android:textSize="28sp"
+                android:textStyle="bold"/>
 
             <TextView
                 android:id="@+id/tvTargetAddress"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="12dp"
                 android:text="@string/register_prompt"
                 android:textColor="@color/text_hint"
-                android:textSize="14sp" />
+                android:textSize="15sp"/>
         </LinearLayout>
+
     </com.google.android.material.card.MaterialCardView>
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:layout_marginBottom="20dp"
-        app:layout_constraintBottom_toBottomOf="parent">
+        android:layout_marginBottom="95dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnGoScan"
@@ -103,6 +116,8 @@
             android:text="@string/btn_manage"
             android:backgroundTint="@color/accent_blue"
             android:textColor="@color/text_white"
-            app:cornerRadius="12dp" />
+            app:cornerRadius="12dp"/>
+
     </LinearLayout>
+
 </androidx.constraintlayout.widget.ConstraintLayout>
