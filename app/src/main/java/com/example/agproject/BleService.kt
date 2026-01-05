@@ -155,11 +155,15 @@ class BleService : Service(), TextToSpeech.OnInitListener {
         } else {
           Log.e(tag, "목표 서비스/특성을 찾을 수 없음 (UUID 확인 필요)")
           saveStatus("경고: 인증 코드가 다릅니다. (UUID 불일치)")
-          sendBroadcastToActivity("ACTION_UUID_MISMATCH")
+
+          val intent = Intent("ACTION_UUID_MISMATCH")
+          intent.setPackage(packageName)
+          applicationContext.sendBroadcast(intent)
 
           // UUID 불일치시 백그라운드 실행 X
-          stopSelf()
-
+          android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            stopSelf()
+          }, 500)
         }
       }
 
