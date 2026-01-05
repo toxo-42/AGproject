@@ -96,26 +96,31 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnGoScan"
-            android:layout_width="0dp"
-            android:layout_height="60dp"
+            android:layout_width="10dp"
+            android:layout_height="70dp"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
             android:text="@string/btn_scan"
-            android:backgroundTint="@color/bg_card"
-            android:textColor="@color/accent_blue"
-            app:strokeColor="@color/accent_blue"
+            android:textColor="#101820"
+            android:textSize="16dp"
+            android:background="@drawable/bg_mint_gradient"
+            app:backgroundTint="@null"
+            app:strokeColor="#101820"
             app:strokeWidth="1dp"
             app:cornerRadius="12dp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnGoManager"
-            android:layout_width="0dp"
-            android:layout_height="60dp"
+            android:layout_width="10dp"
+            android:layout_height="70dp"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
             android:text="@string/btn_manage"
-            android:backgroundTint="@color/accent_blue"
-            android:textColor="@color/text_white"
+            android:textColor="#101820"
+            android:textSize="16dp"
+            android:background="@drawable/bg_mint_gradient"
+            app:backgroundTint="@null"
+            app:strokeColor="#101820"
             app:cornerRadius="12dp"/>
 
     </LinearLayout>

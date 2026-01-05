@@ -1,5 +1,5 @@
 <resources>
-  <string name="app_name">AG System</string>
+  <string name="app_name">AGuard</string>
 
   <string name="app_title">Accu Guard System</string>
   <string name="app_subtitle">Background Safety Monitor</string>
@@ -23,8 +23,8 @@
   <string name="label_mac_address">MAC ADDRESS</string>
   <string name="label_status">STATUS</string>
   <string name="status_monitoring">Active / Monitoring</string>
-  <string name="status_no_device"> 연결된 기기가 없습니다.</string>
-  <string name="status_connected"> 현재 등록되어 감시 대기 중입니다.</string>
+  <string name="status_no_device">연결된 기기가 없습니다.</string>
+  <string name="status_connected">현재 등록되어 감시 대기 중입니다.</string>
   <string name="btn_disconnect">연결 해제 (Disconnect)</string>
   <string name="msg_disconnected">기기 등록이 해제되었습니다.</string>
 
