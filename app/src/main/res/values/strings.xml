@@ -1,7 +1,7 @@
 <resources>
-  <string name="app_name">AGuard</string>
+  <string name="app_name">PeOb</string>
 
-  <string name="app_title">Accu Guard System</string>
+  <string name="app_title">Pedal Observing System</string>
   <string name="app_subtitle">Background Safety Monitor</string>
   <string name="label_current_target">CURRENT TARGET</string>
   <string name="no_device_registered">등록된 기기 없음</string>

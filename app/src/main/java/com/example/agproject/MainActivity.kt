@@ -1,6 +1,7 @@
 package com.example.agproject
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
@@ -12,6 +13,7 @@ import androidx.core.app.ActivityCompat
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.button.MaterialButton
 import android.content.Context
+import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
@@ -78,6 +80,8 @@ class MainActivity : AppCompatActivity() {
     cardCurrentTarget.setOnClickListener {
       toggleSystem()
     }
+
+
   }
 
   override fun onResume() {
@@ -89,12 +93,13 @@ class MainActivity : AppCompatActivity() {
       addAction("ACTION_UUID_MATCHED")
       addAction("ACTION_UUID_MISMATCH")
     }
+
+    // 빨간 줄, 노란 줄 모두 해결한 완벽한 코드
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       registerReceiver(statusReceiver, filter, RECEIVER_NOT_EXPORTED)
     } else {
-      registerReceiver(statusReceiver, filter)
+      ContextCompat.registerReceiver(this, statusReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
-
     updateUI()
   }
 
@@ -128,6 +133,7 @@ class MainActivity : AppCompatActivity() {
     updateUI() // 화면 색상 변경
   }
 
+  @SuppressLint("SetTextI18n")
   private fun updateUI() {
     // 1. 기기가 아예 등록 안 된 상태
     if (targetAddress == null) {
@@ -187,11 +193,7 @@ class MainActivity : AppCompatActivity() {
   private fun startSystem() {
     val serviceIntent = Intent(this, BleService::class.java)
     serviceIntent.putExtra("TARGET_ADDRESS", targetAddress)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      startForegroundService(serviceIntent)
-    } else {
-      startService(serviceIntent)
-    }
+    startForegroundService(serviceIntent)
   }
 
   private fun stopSystem() {
