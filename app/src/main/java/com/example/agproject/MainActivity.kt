@@ -124,7 +124,6 @@ class MainActivity : AppCompatActivity() {
       }
       startSystem()
       isRunning = true
-      Toast.makeText(this, "감시 시스템 시작! (백그라운드)", Toast.LENGTH_SHORT).show()
     }
     updateUI() // 화면 색상 변경
   }
