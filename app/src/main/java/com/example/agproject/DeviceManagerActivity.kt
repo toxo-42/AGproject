@@ -31,18 +31,27 @@ class DeviceManagerActivity : AppCompatActivity() {
     val prefs: SharedPreferences = getSharedPreferences("AgPrefs", MODE_PRIVATE)
     val name = prefs.getString("TARGET_NAME", "등록된 기기 없음")
     val address = prefs.getString("TARGET_ADDRESS", null)
+    val lastStatus = prefs.getString("CONNECTION_STATUS", "연결 상태 확인중...")
 
     // 3. 화면에 정보 표시
     etDeviceName.setText(name)
 
     if (address != null) {
       etMacAddress.setText(address)
-      tvConnectionStatus.text = "✅ 현재 등록되어 감시 대기 중입니다."
-      tvConnectionStatus.setTextColor(getColor(R.color.accent_blue)) // 파란색 (colors.xml에 정의된 색)
+      // 실제 상태를 보여 줌 (UUID 일치, UUID 불일치)
+      tvConnectionStatus.text = lastStatus
+
+      // 만약 "불일치"라는 단어가 있으면 빨간색으로 표시
+      if (lastStatus!!.contains("불일치") || lastStatus.contains("경고")) {
+        tvConnectionStatus.setTextColor(getColor(R.color.red_error))
+      } else {
+        tvConnectionStatus.setTextColor(getColor(R.color.accent_blue))
+      }
+
       btnDisconnect.isEnabled = true
     } else {
       etMacAddress.setText("주소 정보 없음")
-      tvConnectionStatus.text = "⚠️ 연결된 기기가 없습니다."
+      tvConnectionStatus.text = "연결된 기기가 없습니다."
       tvConnectionStatus.setTextColor(getColor(R.color.text_gray))
       btnDisconnect.isEnabled = false // 기기가 없으면 해제 버튼 비활성화
     }
@@ -61,5 +70,12 @@ class DeviceManagerActivity : AppCompatActivity() {
       // 메인 화면으로 돌아가면서 현재 화면 닫기
       finish()
     }
+
+    etMacAddress.setOnLongClickListener {
+      // 길게 누르면 토스트 메시지로 UUID를 살짝 보여줌
+      Toast.makeText(this, "Target UUID: d74d5c87-3d2b-46b3-b8a8-d64ca491735e", Toast.LENGTH_LONG).show()
+      true
+    }
+
   }
 }

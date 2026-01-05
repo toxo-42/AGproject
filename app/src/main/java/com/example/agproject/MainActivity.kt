@@ -11,6 +11,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.button.MaterialButton
+import android.content.Context
 
 class MainActivity : AppCompatActivity() {
 
@@ -24,6 +25,25 @@ class MainActivity : AppCompatActivity() {
   private var isRunning = false
   private var targetAddress: String? = null
   private var targetName: String? = null
+
+  // 0: 대기, 1: 정상, 2: 에러(UUID 다름)
+  private var connectionStatus= 0
+
+  // 방송(Broadcast)을 수신할 '라디오'를 만듭니다.
+  private val statusReceiver = object : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      when (intent?.action) {
+        "ACTION_UUID_MATCHED" -> {
+          connectionStatus = 1 // 정상
+          updateUI()
+        }
+        "ACTION_UUID_MISMATCH" -> {
+          connectionStatus = 2 // 에러 (빨간불)
+          updateUI()
+        }
+      }
+    }
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -62,9 +82,30 @@ class MainActivity : AppCompatActivity() {
 
   override fun onResume() {
     super.onResume()
-    // 화면에 돌아올 때마다 저장된 주소 새로고침
     loadSavedData()
+
+    // 라디오 켜기 (방송 수신 등록)
+    val filter = android.content.IntentFilter().apply {
+      addAction("ACTION_UUID_MATCHED")
+      addAction("ACTION_UUID_MISMATCH")
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      registerReceiver(statusReceiver, filter, RECEIVER_NOT_EXPORTED)
+    } else {
+      registerReceiver(statusReceiver, filter)
+    }
+
     updateUI()
+  }
+
+  override fun onPause() {
+    super.onPause()
+    // 앱이 백그라운드로 가면 라디오 끄기 (배터리 절약)
+    try {
+      unregisterReceiver(statusReceiver)
+    } catch (_: IllegalArgumentException) {
+      // 이미 꺼져있으면 패스
+    }
   }
 
   // --- 시스템 제어 로직 ---
@@ -83,35 +124,59 @@ class MainActivity : AppCompatActivity() {
       }
       startSystem()
       isRunning = true
-      Toast.makeText(this, "🚨 감시 시스템 시작! (백그라운드)", Toast.LENGTH_SHORT).show()
+      Toast.makeText(this, "감시 시스템 시작! (백그라운드)", Toast.LENGTH_SHORT).show()
     }
     updateUI() // 화면 색상 변경
   }
 
   private fun updateUI() {
+    // 1. 기기가 아예 등록 안 된 상태
     if (targetAddress == null) {
       tvTargetName.text = "등록된 기기 없음"
       tvTargetAddress.text = "기기 검색 버튼을 눌러주세요"
-      tvTargetName.setTextColor(getColor(R.color.text_gray)) // 회색
-      cardCurrentTarget.setCardBackgroundColor(getColor(R.color.bg_card)) // 기본 배경
-    } else {
+      tvTargetName.setTextColor(getColor(R.color.text_gray))
+      tvTargetAddress.setTextColor(getColor(R.color.text_hint))
+
+      cardCurrentTarget.setCardBackgroundColor(getColor(R.color.bg_card))
+      cardCurrentTarget.setStrokeWidth(0) // 테두리 없음
+    }
+    // 2. 기기는 등록된 상태
+    else {
       tvTargetName.text = targetName ?: "Unknown Device"
       tvTargetAddress.text = targetAddress
 
       if (isRunning) {
-        // 실행 중일 때: 카드가 파란색/활성 색으로 변함
-        tvTargetAddress.text = "⚡ 실시간 감시 중..."
-        tvTargetName.setTextColor(getColor(R.color.accent_blue))
-        cardCurrentTarget.setStrokeColor(getColor(R.color.accent_blue))
-        cardCurrentTarget.setStrokeWidth(4) // 테두리 강조
+        // [수정] connectionStatus에 따라 색깔놀이
+        when (connectionStatus) {
+          1 -> { // 정상 연결 (파란색)
+            tvTargetAddress.text = "⚡ 실시간 감시 중..."
+            tvTargetName.setTextColor(getColor(R.color.accent_blue))
+            cardCurrentTarget.setStrokeColor(getColor(R.color.accent_blue))
+            cardCurrentTarget.setStrokeWidth(4) // 굵게
+          }
+          2 -> { // UUID 불일치 (빨간색)
+            tvTargetAddress.text = "잘못된 기기입니다 (UUID 불일치)"
+            tvTargetAddress.setTextColor(getColor(R.color.red_error)) // 글자도 빨갛게
+            tvTargetName.setTextColor(getColor(R.color.red_error))
+            cardCurrentTarget.setStrokeColor(getColor(R.color.red_error)) // 테두리 빨갛게!
+            cardCurrentTarget.setStrokeWidth(8) // 더 굵게 경고!
+          }
+          else -> { // 연결 시도 중... (0번 상태)
+            tvTargetAddress.text = "연결 시도 중..."
+            tvTargetName.setTextColor(getColor(R.color.text_white)) // 연결 중엔 흰색 유지
+            cardCurrentTarget.setStrokeColor(getColor(R.color.text_gray))
+            cardCurrentTarget.setStrokeWidth(2)
+          }
+        }
       } else {
-        // 대기 중일 때
+        // 정지 상태 (원상복구)
+        connectionStatus = 0 // 상태 초기화
         tvTargetName.setTextColor(getColor(R.color.text_white))
-        cardCurrentTarget.setStrokeWidth(0) // 테두리 없음
+        tvTargetAddress.setTextColor(getColor(R.color.text_hint))
+        cardCurrentTarget.setStrokeWidth(0)
       }
     }
   }
-
   // --- 데이터 및 서비스 관리 ---
 
   private fun loadSavedData() {

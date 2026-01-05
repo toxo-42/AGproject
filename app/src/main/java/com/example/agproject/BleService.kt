@@ -7,7 +7,6 @@ import android.app.NotificationManager
 import android.app.Service
 import android.bluetooth.*
 import android.bluetooth.le.*
-import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -32,7 +31,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
   override fun onCreate() {
     super.onCreate()
     createNotificationChannel()
-    val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+    val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
     bluetoothAdapter = bluetoothManager.adapter
     bluetoothLeScanner = bluetoothAdapter?.bluetoothLeScanner
     tts = TextToSpeech(this, this)
@@ -114,11 +113,11 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     @SuppressLint("MissingPermission")
     override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
       if (newState == BluetoothProfile.STATE_CONNECTED) {
-        Log.i(tag, "✅ [성공] 기기 연결됨! 서비스를 탐색합니다...")
+        Log.i(tag, "[성공] 기기 연결됨! 서비스를 탐색합니다...")
         updateNotification("기기 연결됨 - 데이터 수신 대기 중 📡")
         gatt?.discoverServices()
       } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-        Log.w(tag, "🔌 연결 끊김. 재연결 시도...")
+        Log.w(tag, "연결 끊김. 재연결 시도...")
         startTargetScan()
       }
     }
@@ -147,23 +146,34 @@ class BleService : Service(), TextToSpeech.OnInitListener {
               gatt.writeDescriptor(descriptor)
             }
           }
-          Log.i(tag, "👂 데이터 수신 모드 활성화 완료 (Notify ON)")
-          speakOut("시스템 가동. 감시를 시작합니다.")
+          Log.i(tag, "데이터 수신 모드 활성화 완료 (Notify ON)")
+          speakOut("시스템 가동. 감지를 시작합니다.")
+
+          saveStatus("정상 연결")
+          sendBroadcastToActivity("ACTION_UUID_MATCHED")
+
         } else {
-          Log.e(tag, "❌ 목표 서비스/특성을 찾을 수 없음 (UUID 확인 필요)")
+          Log.e(tag, "목표 서비스/특성을 찾을 수 없음 (UUID 확인 필요)")
+          saveStatus("경고: 인증 코드가 다릅니다. (UUID 불일치)")
+          sendBroadcastToActivity("ACTION_UUID_MISMATCH")
+
+          // UUID 불일치시 백그라운드 실행 X
+          stopSelf()
+
         }
       }
-    }
 
+    }
+    @Deprecated("Deprecated in Java")
     override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
       // 구형 방식 getStringValue 사용 (경고 억제됨)
       val receivedData = characteristic.getStringValue(0) ?: ""
-      Log.d(tag, "📩 수신된 데이터: $receivedData")
+      Log.d(tag, "수신된 데이터: $receivedData")
 
       if (receivedData.contains("ERR") || receivedData.contains("1")) {
-        Log.e(tag, "🚨 [위험] 페달 오조작 감지됨!")
+        Log.e(tag, "[위험] 페달 오조작 감지됨!")
         speakOut("위험합니다! 브레이크를 확인하세요!")
-        updateNotification("🚨 경고: 페달 오조작 감지됨!")
+        updateNotification("경고: 페달 오조작 감지됨!")
       }
     }
   }
@@ -210,5 +220,16 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     bluetoothGatt?.disconnect()
     bluetoothGatt?.close()
     bluetoothGatt = null
+  }
+
+  private fun saveStatus(statusMsg: String) {
+    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    prefs.edit().putString("CONNECTION_STATUS", statusMsg).apply()
+  }
+
+  private fun sendBroadcastToActivity(action: String) {
+    val intent = Intent(action)
+    intent.setPackage(packageName) // 우리 앱한테만 보내기
+    sendBroadcast(intent)
   }
 }

@@ -5,8 +5,8 @@
     <color name="accent_blue">#00E676</color>
     <color name="accent_pressed">#00C853</color>
     <color name="text_white">#FFFFFF</color>
-    <color name="text_gray">#B0BEC5</color> <color name="text_hint">#546E7A</color>
+    <color name="text_gray">#B0BEC5</color>
+    <color name="text_hint">#546E7A</color>
     <color name="red_error">#FF5252</color>
 </resources>
 
-<!--blue_dark_gray-->

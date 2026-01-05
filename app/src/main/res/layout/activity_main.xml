@@ -96,7 +96,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnGoScan"
-            android:layout_width="10dp"
+            android:layout_width="0dp"
             android:layout_height="70dp"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
@@ -111,7 +111,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnGoManager"
-            android:layout_width="10dp"
+            android:layout_width="0dp"
             android:layout_height="70dp"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
