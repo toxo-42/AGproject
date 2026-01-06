@@ -203,10 +203,18 @@ class BleService : Service(), TextToSpeech.OnInitListener
       val receivedData = characteristic.getStringValue(0) ?: ""
       Log.d(tag, "수신된 데이터: $receivedData")
 
-      if (receivedData.contains("ERR") || receivedData.contains("1")) {
+      if (receivedData.contains("PEDAL_ERR") || receivedData.contains("1")) {
         Log.e(tag, "[위험] 페달 오조작 감지됨!")
         speakOut("경고!!! 페달 조작을 확인하세요!!")
         updateNotification("경고: 페달 오조작 감지됨!")
+      }else if (receivedData.contains("MODULE_ERR")) {
+        Log.e(tag, "[주의] 장치 오류 감지됨!")
+        speakOut("시스템 오류입니다. 장치를 확인 해주세요.")
+        updateNotification("주의: 장치 오류 발생")
+
+
+      }else{
+        Log.i(tag, "정상 데이터 수신중: $receivedData")
       }
     }
   }
