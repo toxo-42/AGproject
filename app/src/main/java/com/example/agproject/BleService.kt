@@ -64,8 +64,8 @@ class BleService : Service(), TextToSpeech.OnInitListener
         }
 
         // 4. 톤과 속도 설정 (여성 목소리는 기본 1.0이 제일 자연스러움)
-        tts?.setPitch(1.0f)
-        tts?.setSpeechRate(1.5f)
+        tts?.setPitch(1.1f)
+        tts?.setSpeechRate(1.3f)
       }
     } else {
       Log.e(tag, "TTS 초기화 실패!")
@@ -205,7 +205,7 @@ class BleService : Service(), TextToSpeech.OnInitListener
 
       if (receivedData.contains("ERR") || receivedData.contains("1")) {
         Log.e(tag, "[위험] 페달 오조작 감지됨!")
-        speakOut("경고! 페달 조작을 확인하세요!!")
+        speakOut("경고!!! 페달 조작을 확인하세요!!")
         updateNotification("경고: 페달 오조작 감지됨!")
       }
     }
