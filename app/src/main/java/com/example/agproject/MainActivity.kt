@@ -154,7 +154,7 @@ class MainActivity : AppCompatActivity() {
         // [수정] connectionStatus에 따라 색깔놀이
         when (connectionStatus) {
           1 -> { // 정상 연결 (파란색)
-            tvTargetAddress.text = "⚡ 실시간 감시 중..."
+            tvTargetAddress.text = "실시간 감시 중..."
             tvTargetName.setTextColor(getColor(R.color.accent_blue))
             cardCurrentTarget.setStrokeColor(getColor(R.color.accent_blue))
             cardCurrentTarget.setStrokeWidth(4) // 굵게

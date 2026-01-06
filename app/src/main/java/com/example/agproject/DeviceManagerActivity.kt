@@ -73,7 +73,9 @@ class DeviceManagerActivity : AppCompatActivity() {
 
     etMacAddress.setOnLongClickListener {
       // 길게 누르면 토스트 메시지로 UUID를 살짝 보여줌
-      Toast.makeText(this, "Target UUID: d74d5c87-3d2b-46b3-b8a8-d64ca491735e", Toast.LENGTH_LONG).show()
+      Toast.makeText(this, "Service UUID: d74d5c87-3d2b-46b3-b8a8-d64ca4917301", Toast.LENGTH_LONG).show()
+      Toast.makeText(this, "Char UUID: d74d5c87-3d2b-46b3-b8a8-d64ca491735e", Toast.LENGTH_LONG).show()
+
       true
     }
 
