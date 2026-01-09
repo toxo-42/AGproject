@@ -58,11 +58,7 @@ class BleService : Service(), TextToSpeech.OnInitListener
         // 3. 찾았으면 그 목소리로 설정!
         if (femaleVoice != null) {
           tts?.voice = femaleVoice
-          Log.i(tag, "여성 목소리 설정 완료: ${femaleVoice.name}")
-        } else {
-          Log.w(tag, "여성 목소리를 찾지 못해 기본 목소리로 설정합니다.")
         }
-
         // 4. 톤과 속도 설정 (여성 목소리는 기본 1.0이 제일 자연스러움)
         tts?.setPitch(1.1f)
         tts?.setSpeechRate(1.3f)
@@ -154,7 +150,7 @@ class BleService : Service(), TextToSpeech.OnInitListener
     @SuppressLint("MissingPermission")
     override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
       if (status == BluetoothGatt.GATT_SUCCESS) {
-        // 변수 이름 소문자로 변경
+        // UUID STATUS
         val serviceUuid = "d74d5c87-3d2b-46b3-b8a8-d64ca4917301"
         val charUuid = "d74d5c87-3d2b-46b3-b8a8-d64ca491735e"
 
@@ -185,6 +181,7 @@ class BleService : Service(), TextToSpeech.OnInitListener
           Log.e(tag, "목표 서비스/특성을 찾을 수 없음 (UUID 확인 필요)")
           saveStatus("경고: 인증 코드가 다릅니다. (UUID 불일치)")
 
+
           val intent = Intent("ACTION_UUID_MISMATCH")
           intent.setPackage(packageName)
           applicationContext.sendBroadcast(intent)
@@ -203,16 +200,18 @@ class BleService : Service(), TextToSpeech.OnInitListener
       val receivedData = characteristic.getStringValue(0) ?: ""
       Log.d(tag, "수신된 데이터: $receivedData")
 
-      if (receivedData.contains("PEDAL_ERR") || receivedData.contains("1")) {
+      if (receivedData.contains("PEDAL_ERR")) {
         Log.e(tag, "[위험] 페달 오조작 감지됨!")
         speakOut("경고!!! 페달 조작을 확인하세요!!")
         updateNotification("경고: 페달 오조작 감지됨!")
       }else if (receivedData.contains("MODULE_ERR")) {
-        Log.e(tag, "[주의] 장치 오류 감지됨!")
-        speakOut("시스템 오류입니다. 장치를 확인 해주세요.")
-        updateNotification("주의: 장치 오류 발생")
-
-
+        Log.e(tag, "[주의] 기기 연결 오류 감지됨!")
+        speakOut("기기 연결 오류입니다. 장치를 확인 해주세요.")
+        updateNotification("주의: 장치 연결 오류!")
+      }else if (receivedData.contains("NETWORK_ERR")) {
+        Log.e(tag, "[주의] 모듈 통신 오류 감지됨!")
+        speakOut("기기 통신 시스템 오류입니다. 장치를 확인 해주세요.")
+        updateNotification("주의: 기기 통신 시스템 오류!")
       }else{
         Log.i(tag, "정상 데이터 수신중: $receivedData")
       }
@@ -274,4 +273,5 @@ class BleService : Service(), TextToSpeech.OnInitListener
     intent.setPackage(packageName) // 우리 앱한테만 보내기
     sendBroadcast(intent)
   }
+
 }
