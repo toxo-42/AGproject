@@ -45,21 +45,16 @@ class BleService : Service(), TextToSpeech.OnInitListener
       if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
         Log.e(tag, "이 언어는 지원되지 않습니다.")
       } else {
-        // 👇 [여기서부터 추가!] 여성 목소리 찾기 로직 👇
 
-        // 1. 폰에 있는 모든 목소리 리스트를 가져와
         val voiceList = tts?.voices
 
-        // 2. 그중에서 '한국어'이면서 이름에 'female'이 들어간 목소리를 찾아
         val femaleVoice = voiceList?.find {
           it.locale.language == "ko" && it.name.contains("female", ignoreCase = true)
         }
-
-        // 3. 찾았으면 그 목소리로 설정!
         if (femaleVoice != null) {
           tts?.voice = femaleVoice
         }
-        // 4. 톤과 속도 설정 (여성 목소리는 기본 1.0이 제일 자연스러움)
+        // 4. 톤과 속도 설정
         tts?.setPitch(1.1f)
         tts?.setSpeechRate(1.3f)
       }
@@ -69,6 +64,7 @@ class BleService : Service(), TextToSpeech.OnInitListener
   }
   @SuppressLint("ForegroundServiceType")
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+
     targetAddress = intent?.getStringExtra("TARGET_ADDRESS")
 
     if (targetAddress == null) {
@@ -173,7 +169,10 @@ class BleService : Service(), TextToSpeech.OnInitListener
           }
           Log.i(tag, "데이터 수신 모드 활성화 완료 (Notify ON)")
           speakOut("시스템 가동. 감지를 시작합니다.")
-
+          // 시간 동기화 실행 함수
+          android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            sendTimeSync()
+          }, 500)
           saveStatus("정상 연결")
           sendBroadcastToActivity("ACTION_UUID_MATCHED")
 
@@ -263,6 +262,7 @@ class BleService : Service(), TextToSpeech.OnInitListener
     bluetoothGatt = null
   }
 
+
   private fun saveStatus(statusMsg: String) {
     val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
     prefs.edit().putString("CONNECTION_STATUS", statusMsg).apply()
@@ -273,5 +273,60 @@ class BleService : Service(), TextToSpeech.OnInitListener
     intent.setPackage(packageName) // 우리 앱한테만 보내기
     sendBroadcast(intent)
   }
+  // Data -> Module function
+  @SuppressLint("MissingPermission")
+  private fun writeToModule(message: String) {
+    if (bluetoothGatt == null) {
+      Log.e(tag, "❌ 연결된 기기가 없어 전송 실패")
+      return
+    }
 
+    val serviceUuid = UUID.fromString("d74d5c87-3d2b-46b3-b8a8-d64ca4917301")
+    val charUuid = UUID.fromString("d74d5c87-3d2b-46b3-b8a8-d64ca491735e")
+
+    val service = bluetoothGatt?.getService(serviceUuid)
+    val characteristic = service?.getCharacteristic(charUuid)
+
+    if (characteristic != null) {
+      val dataBytes = message.toByteArray(Charsets.UTF_8)
+      val writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT // 혹은 WRITE_TYPE_NO_RESPONSE
+
+      // 안드로이드 버전에 따라 다르게 처리
+      val success = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        // 최신 폰 (Android 13 이상): 함수 안에 데이터랑 타입을 다 넣어줘야 함
+        bluetoothGatt?.writeCharacteristic(characteristic, dataBytes, writeType) == BluetoothStatusCodes.SUCCESS
+      } else {
+        // 구형 폰 (Android 12 이하) (값 먼저 넣고 전송)
+        characteristic.writeType = writeType
+        characteristic.value = dataBytes
+        @Suppress("DEPRECATION") // 구형 방식 경고 무시 태그
+        bluetoothGatt?.writeCharacteristic(characteristic) ?: false
+      }
+
+      if (success) {
+        Log.i(tag, "데이터 전송 성공: $message")
+      } else {
+        Log.e(tag, "데이터 전송 실패")
+      }
+
+    } else {
+      Log.e(tag, "쓰기 가능한 특성을 찾을 수 없음")
+    }
+  }
+
+  // 현재 시간을 모듈에 동기화
+  private fun sendTimeSync() {
+    // 방법 1: Unix Timestamp (숫자만 보내는 방식 )
+    // 예: 1705324567 (1970년 1월 1일부터 흐른 초)
+    val currentTimestamp = System.currentTimeMillis() / 1000
+    val command = "TIME:$currentTimestamp"
+
+    // 방법 2: 날짜 문자열
+    // val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.KOREA)
+    // val dateStr = sdf.format(java.util.Date())
+    // val command = "TIME:$dateStr"
+
+    Log.d(tag, "시간 동기화 시도: $command")
+    writeToModule(command)
+  }
 }
