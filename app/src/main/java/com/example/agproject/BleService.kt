@@ -13,6 +13,8 @@ import android.os.IBinder
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.*
 
 class BleService : Service(), TextToSpeech.OnInitListener
@@ -171,7 +173,7 @@ class BleService : Service(), TextToSpeech.OnInitListener
           speakOut("시스템 가동. 감지를 시작합니다.")
           // 시간 동기화 실행 함수
           android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            sendTimeSync()
+            sendTimeSyncBinary()
           }, 500)
           saveStatus("정상 연결")
           sendBroadcastToActivity("ACTION_UUID_MATCHED")
@@ -274,10 +276,11 @@ class BleService : Service(), TextToSpeech.OnInitListener
     sendBroadcast(intent)
   }
   // Data -> Module function
+  // ByteArray 전송용 (바이너리 데이터용)
   @SuppressLint("MissingPermission")
-  private fun writeToModule(message: String) {
+  private fun writeToModule(dataBytes: ByteArray) {
     if (bluetoothGatt == null) {
-      Log.e(tag, "❌ 연결된 기기가 없어 전송 실패")
+      Log.e(tag, "연결된 기기가 없어 전송 실패")
       return
     }
 
@@ -288,45 +291,52 @@ class BleService : Service(), TextToSpeech.OnInitListener
     val characteristic = service?.getCharacteristic(charUuid)
 
     if (characteristic != null) {
-      val dataBytes = message.toByteArray(Charsets.UTF_8)
-      val writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT // 혹은 WRITE_TYPE_NO_RESPONSE
+      val writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
 
-      // 안드로이드 버전에 따라 다르게 처리
-      val success = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        // 최신 폰 (Android 13 이상): 함수 안에 데이터랑 타입을 다 넣어줘야 함
+      // 안드로이드 버전별 분기 처리
+      // 안드로이드 14 version
+      val success = if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         bluetoothGatt?.writeCharacteristic(characteristic, dataBytes, writeType) == BluetoothStatusCodes.SUCCESS
-      } else {
-        // 구형 폰 (Android 12 이하) (값 먼저 넣고 전송)
+      } else { // 안드로이드 13 이전 version
         characteristic.writeType = writeType
-        characteristic.value = dataBytes
-        @Suppress("DEPRECATION") // 구형 방식 경고 무시 태그
+        characteristic.value = dataBytes // String 변환 없이 바로 넣음
+        @Suppress("DEPRECATION")
         bluetoothGatt?.writeCharacteristic(characteristic) ?: false
       }
 
       if (success) {
-        Log.i(tag, "데이터 전송 성공: $message")
+        Log.i(tag, "바이너리 데이터 전송 성공 (${dataBytes.size} bytes)")
       } else {
-        Log.e(tag, "데이터 전송 실패")
+        Log.e(tag, "바이너리 데이터 전송 실패")
       }
-
     } else {
       Log.e(tag, "쓰기 가능한 특성을 찾을 수 없음")
     }
   }
 
+
   // 현재 시간을 모듈에 동기화
-  private fun sendTimeSync() {
-    // 방법 1: Unix Timestamp (숫자만 보내는 방식 )
-    // 예: 1705324567 (1970년 1월 1일부터 흐른 초)
-    val currentTimestamp = System.currentTimeMillis() / 1000
-    val command = "TIME:$currentTimestamp"
+// [수정] 16바이트(8+8) 바이너리 시간 동기화
+  private fun sendTimeSyncBinary() {
+    val currentTimeMillis = System.currentTimeMillis()
 
-    // 방법 2: 날짜 문자열
-    // val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.KOREA)
-    // val dateStr = sdf.format(java.util.Date())
-    // val command = "TIME:$dateStr"
+    // 1. 초(Seconds)와 마이크로초(Microseconds) 계산
+    val sec: Long = currentTimeMillis / 1000
+    val usec: Long = (currentTimeMillis % 1000) * 1000
 
-    Log.d(tag, "시간 동기화 시도: $command")
-    writeToModule(command)
+    // 2. 버퍼 생성 (Total 16 Bytes)
+    // 구조: [초(8byte)] + [마이크로초(8byte)]
+    val buffer = ByteBuffer.allocate(16)
+    buffer.order(ByteOrder.LITTLE_ENDIAN) // ARM MCU는 리틀 엔디안 사용
+
+    buffer.putLong(sec)  // 0~7 byte: 초 (Time_t corresponds to int64_t)
+    buffer.putLong(usec) // 8~15 byte: 마이크로초 (suseconds_t forced to int64_t)
+
+    val dataBytes = buffer.array()
+
+    // 3. 전송
+    Log.d(tag, "시간 동기화(Binary 16bytes): sec=$sec, usec=$usec")
+    writeToModule(dataBytes) //중요: ByteArray를 받는 함수가 필요함 (아래 참고)
   }
+
 }
