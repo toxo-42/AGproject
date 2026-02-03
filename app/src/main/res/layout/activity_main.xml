@@ -4,15 +4,30 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_dark"
-    android:padding="20dp">
+    android:background="@color/bg_dark">
+
+    <ImageView
+        android:id="@+id/ivBackground"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:contentDescription="Background Image"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#99000000" />
 
     <TextView
         android:id="@+id/tvAppTitle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="60dp"
-        android:layout_marginStart="4dp"
+        android:layout_marginStart="24dp"
         android:text="@string/app_title"
         android:textColor="@color/accent_blue"
         android:textSize="36sp"
@@ -25,14 +40,13 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:layout_marginStart="4dp"
+        android:layout_marginStart="24dp"
         android:text="@string/app_subtitle"
         android:textColor="@color/text_gray"
         android:textSize="18sp"
         app:layout_constraintTop_toBottomOf="@id/tvAppTitle"
         app:layout_constraintStart_toStartOf="parent" />
 
-<!--    카드안에 글씨 수정-->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/cardCurrentTarget"
         android:layout_width="match_parent"
@@ -90,6 +104,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:layout_marginBottom="95dp"
+        android:layout_marginHorizontal="20dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -124,7 +139,5 @@
             app:cornerRadius="12dp"/>
 
     </LinearLayout>
-
-
 
 </androidx.constraintlayout.widget.ConstraintLayout>

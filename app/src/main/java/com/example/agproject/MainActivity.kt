@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
 import android.os.Bundle
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -14,6 +15,10 @@ import com.google.android.material.card.MaterialCardView
 import com.google.android.material.button.MaterialButton
 import android.content.Context
 import androidx.core.content.ContextCompat
+import com.bumptech.glide.Glide
+import com.bumptech.glide.request.RequestOptions
+import jp.wasabeef.glide.transformations.BlurTransformation
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -43,6 +48,9 @@ class MainActivity : AppCompatActivity() {
           connectionStatus = 2 // 에러 (빨간불)
           updateUI()
         }
+        "ACTION_MODULE_ERROR" ->{
+         showErrorPopup()// 팝업 띄우는 함수 실행
+        }
       }
     }
   }
@@ -50,6 +58,14 @@ class MainActivity : AppCompatActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
+
+    // 배경 블러처리
+    val ivBackground = findViewById<ImageView>(R.id.ivBackground)
+
+    Glide.with(this)
+      .load(R.drawable.bg_main_capture)// 캡처해서 넣은 이미지 파일명
+      .apply(RequestOptions.bitmapTransform(BlurTransformation(25, 10)))
+      .into(ivBackground)
 
     // 2. UI 연결 (activity_main.xml의 ID와 연결)
     cardCurrentTarget = findViewById(R.id.cardCurrentTarget)
@@ -92,6 +108,7 @@ class MainActivity : AppCompatActivity() {
     val filter = android.content.IntentFilter().apply {
       addAction("ACTION_UUID_MATCHED")
       addAction("ACTION_UUID_MISMATCH")
+      addAction("ACTION_MODULE_ERROR")
     }
 
     // 빨간 줄, 노란 줄 모두 해결한 완벽한 코드
@@ -225,5 +242,31 @@ class MainActivity : AppCompatActivity() {
       }
     }
     ActivityCompat.requestPermissions(this, permissions, 1)
+  }
+
+  // [수정] 팝업 로직 완벽 수정!
+  private fun showErrorPopup() {
+    val builder = androidx.appcompat.app.AlertDialog.Builder(this)
+
+    val dialogView = layoutInflater.inflate(R.layout.dialog_warning, null)
+    builder.setView(dialogView)
+
+    val dialog = builder.create()
+    dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+    dialog.setCancelable(false) // 바깥 눌러도 안 꺼지게
+
+    val btnConfirm = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnConfirm)
+
+    // 버튼을 누르면 -> 서비스에 "해제 명령" 보내고 -> 창 닫기
+    btnConfirm.setOnClickListener {
+      // 1. 서비스에 "ACTION_CLEAR_ERROR" 명령 발송
+      val serviceIntent = Intent(this, BleService::class.java)
+      serviceIntent.action = "ACTION_CLEAR_ERROR"
+      startService(serviceIntent) // BleService의 onStartCommand 호출
+
+      // 2. 팝업 닫기
+      dialog.dismiss()
+    }
+    dialog.show()
   }
 }
