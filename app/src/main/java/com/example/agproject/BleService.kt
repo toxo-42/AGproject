@@ -221,16 +221,16 @@ class BleService : Service(), TextToSpeech.OnInitListener {
         if (!isErrorDialogShowing) {
           isErrorDialogShowing = true // 깃발 올리기
 
-          Log.w(tag, "[주의] 장치 오류 감지 -> 팝업 호출")
+          Log.w(tag, "[주의] 장치 오류 감지")
           speakOut("장치 오류입니다. 장치를 점검해주세요.")
-          updateNotification("⚠주의: 장치 오류 발생")
+          updateNotification("주의: 장치 오류 발생")
 
           // 메인 화면에 팝업 띄우라고 방송
           val intent = Intent("ACTION_MODULE_ERROR")
           intent.setPackage(packageName)
           sendBroadcast(intent)
         } else {
-          Log.d(tag, "🔇 에러 중복 수신 무시됨 (사용자 확인 대기 중)")
+          Log.d(tag, "에러 중복 수신 무시됨 (사용자 확인 대기 중)")
         }
         return // 처리 했으니 종료
       }
@@ -326,7 +326,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     }
   }
 
-  // 👇 [제자님 요청] 에러 해제 전송용 (735f로 보냄 - 0xAA 전송용)
+  // 에러 해제 전송용 (735f로 보냄 - 0xAA 전송용)
   @SuppressLint("MissingPermission")
   private fun writeToErrorCharacteristic(dataBytes: ByteArray) {
     if (bluetoothGatt == null) {
@@ -345,7 +345,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
 
       // 로그 추가: 내가 뭘 보내는지 확인
       val hexString = dataBytes.joinToString(separator = " ") { "0x%02X".format(it) }
-      Log.d(tag, "📤 [에러해제 전송] 타겟: 735f / 데이터: $hexString")
+      Log.d(tag, "[에러해제 전송] 타겟: 735f / 데이터: $hexString")
 
       val success = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         bluetoothGatt?.writeCharacteristic(characteristic, dataBytes, writeType) == BluetoothStatusCodes.SUCCESS
