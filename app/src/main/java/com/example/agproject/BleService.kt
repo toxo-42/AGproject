@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.bluetooth.*
 import android.bluetooth.le.*
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -31,6 +32,8 @@ class BleService : Service(), TextToSpeech.OnInitListener {
 
   // 에러 팝업이 떠있는지 체크하는 변수
   private var isErrorDialogShowing = false
+
+  private var isCapacityDialogShowing = false
 
   override fun onCreate() {
     super.onCreate()
@@ -66,8 +69,15 @@ class BleService : Service(), TextToSpeech.OnInitListener {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     // 팝업에서 "확인" 버튼 눌렀을 때 실행됨
     if (intent?.action == "ACTION_CLEAR_ERROR") {
-      Log.i(tag, "✅ 사용자 확인 완료 -> 복구 시퀀스(0xAA) 시작")
+      Log.i(tag, "사용자 확인 완료 -> 복구 시퀀스(0xAA) 시작")
       handleErrorClearSequence()
+      return START_NOT_STICKY
+    }
+
+    if (intent?.action == "ACTION_CLEAR_CAPACITY"){
+      Log.i(tag, "용량 부족 경고 확인")
+      handleCapacityClearSequence()
+
       return START_NOT_STICKY
     }
 
@@ -88,7 +98,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     return START_NOT_STICKY
   }
 
-  // [핵심] 에러 해제 시퀀스
+  // 에러 해제 시퀀스
   private fun handleErrorClearSequence() {
     // 1. 0xAA 바이트 준비
     val resetCommand = byteArrayOf(0xAA.toByte())
@@ -101,6 +111,20 @@ class BleService : Service(), TextToSpeech.OnInitListener {
       isErrorDialogShowing = false // 다시 감시 시작
       Log.i(tag, "🔄 모듈 에러 감시 재개 (Dialog Flag Reset)")
     }, 210)
+  }
+
+  private fun handleCapacityClearSequence() {
+    //1. 0xAB byte 준비
+    val comfirmCommend = byteArrayOf(0xAB.toByte())
+
+    //2. 735f channel transmission
+    writeToErrorCharacteristic(comfirmCommend)
+
+    //3. 210ms 이후 감시 재개
+    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+      isCapacityDialogShowing = false
+      Log.i(tag, "용량 감시 경고 재개")
+    },210)
   }
 
   override fun onDestroy() {
@@ -214,8 +238,6 @@ class BleService : Service(), TextToSpeech.OnInitListener {
       val receivedData = characteristic.getStringValue(0) ?: ""
       Log.d(tag, "수신된 데이터: $receivedData")
 
-      // [수정] 735e로 들어오든 735f로 들어오든 상관없이 내용 검사!
-
       // 1. MODULE_ERR 체크 (735e로 들어오는 것 확실히 잡음)
       if (receivedData.contains("MODULE_ERR")) {
         if (!isErrorDialogShowing) {
@@ -247,10 +269,34 @@ class BleService : Service(), TextToSpeech.OnInitListener {
       } else {
         Log.i(tag, "정상 데이터 수신중: $receivedData")
       }
+
+
+      if (receivedData.contains("SD_SMALL")){
+        if(!isCapacityDialogShowing){
+          isCapacityDialogShowing = true
+
+          Log.w(tag, "[경고] SD카드 용량 부족 감지됨!")
+          updateNotification("경고: SD카드 용량 부족")
+
+          val intent = Intent("ACTION_SD_CARD_WARNING")
+          intent.setPackage(packageName)
+          sendBroadcast(intent)
+
+        }
+      }
     }
   }
 
   private fun speakOut(text: String) {
+    // 설정 저장값 불러오기
+    val prefs = getSharedPreferences("AgPrefs", Context.MODE_PRIVATE)
+    val pitch = prefs.getFloat("TTS_PITCH", 1.0f)
+    val speed = prefs.getFloat("TTS_PITCH", 1.0f)
+
+    // TTS 엔진에 설정 적용
+    tts?.setPitch(pitch)
+    tts?.setSpeechRate(speed)
+
     tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "ID")
   }
 
@@ -335,7 +381,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     }
 
     val serviceUuid = UUID.fromString("d74d5c87-3d2b-46b3-b8a8-d64ca4917301")
-    val errUuid = UUID.fromString("d74d5c87-3d2b-46b3-b8a8-d64ca491735f") // 🔥 735f (에러용)
+    val errUuid = UUID.fromString("d74d5c87-3d2b-46b3-b8a8-d64ca491735f") // 735f (에러용)
 
     val service = bluetoothGatt?.getService(serviceUuid)
     val characteristic = service?.getCharacteristic(errUuid)

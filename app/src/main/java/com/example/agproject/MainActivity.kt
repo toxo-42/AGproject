@@ -51,6 +51,9 @@ class MainActivity : AppCompatActivity() {
         "ACTION_MODULE_ERROR" ->{
          showErrorPopup()// 팝업 띄우는 함수 실행
         }
+        "ACTION_SD_CARD_WARNING" -> {
+          showCapacityWarningPopup()
+        }
       }
     }
   }
@@ -64,7 +67,7 @@ class MainActivity : AppCompatActivity() {
 
     Glide.with(this)
       .load(R.drawable.bg_main_capture)// 캡처해서 넣은 이미지 파일명
-      .apply(RequestOptions.bitmapTransform(BlurTransformation(25, 10)))
+      .apply(RequestOptions.bitmapTransform(BlurTransformation(25, 3)))
       .into(ivBackground)
 
     // 2. UI 연결 (activity_main.xml의 ID와 연결)
@@ -109,6 +112,7 @@ class MainActivity : AppCompatActivity() {
       addAction("ACTION_UUID_MATCHED")
       addAction("ACTION_UUID_MISMATCH")
       addAction("ACTION_MODULE_ERROR")
+      addAction("ACTION_SD_CARD_WARNING")
     }
 
     // 빨간 줄, 노란 줄 모두 해결한 완벽한 코드
@@ -131,7 +135,6 @@ class MainActivity : AppCompatActivity() {
   }
 
   // --- 시스템 제어 로직 ---
-
   private fun toggleSystem() {
     if (isRunning) {
       // STOP 기능
@@ -244,7 +247,7 @@ class MainActivity : AppCompatActivity() {
     ActivityCompat.requestPermissions(this, permissions, 1)
   }
 
-  // [수정] 팝업 로직 완벽 수정!
+  // 팝업 로직 완벽 수정!
   private fun showErrorPopup() {
     val builder = androidx.appcompat.app.AlertDialog.Builder(this)
 
@@ -265,6 +268,30 @@ class MainActivity : AppCompatActivity() {
       startService(serviceIntent) // BleService의 onStartCommand 호출
 
       // 2. 팝업 닫기
+      dialog.dismiss()
+    }
+    dialog.show()
+  }
+
+  private fun showCapacityWarningPopup() {
+    if (isFinishing || isDestroyed) return
+
+    val builder = androidx.appcompat.app.AlertDialog.Builder(this)
+
+    val dialogView = layoutInflater.inflate(R.layout.capacity_warning, null)
+    builder.setView(dialogView)
+
+    val dialog = builder.create()
+    dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+    dialog.setCancelable(false)
+
+    val btnConfirm = dialogView.findViewById<MaterialButton>(R.id.btnConfirm)
+
+    btnConfirm.setOnClickListener {
+      val serviceIntent = Intent(this, BleService::class.java)
+      serviceIntent.action = "ACTION_CLEAR_CAPACITY"
+      startService(serviceIntent)
+
       dialog.dismiss()
     }
     dialog.show()
