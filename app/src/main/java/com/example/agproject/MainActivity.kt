@@ -257,7 +257,7 @@ class MainActivity : AppCompatActivity() {
     dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
     dialog.setCancelable(false) // 바깥 눌러도 안 꺼지게
 
-    val btnConfirm = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnConfirm)
+    val btnConfirm = dialogView.findViewById<MaterialButton>(R.id.btnConfirm)
 
     // 버튼을 누르면 -> 서비스에 "해제 명령" 보내고 -> 창 닫기
     btnConfirm.setOnClickListener {
