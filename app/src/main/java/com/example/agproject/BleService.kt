@@ -285,18 +285,21 @@ class BleService : Service(), TextToSpeech.OnInitListener {
         }
       }
     }
-  }
 
   private fun speakOut(text: String) {
-    // 설정 저장값 불러오기
+    // 1. 설정값 불러오기
     val prefs = getSharedPreferences("AgPrefs", Context.MODE_PRIVATE)
-    val pitch = prefs.getFloat("TTS_PITCH", 1.0f)
-    val speed = prefs.getFloat("TTS_PITCH", 1.0f)
 
-    // TTS 엔진에 설정 적용
+    val pitch = prefs.getFloat("TTS_PITCH", 1.0f)
+    val speed = prefs.getFloat("TTS_SPEED", 1.0f) // 오타 수정됨!
+
+    // (성별 로직 삭제: 시스템 설정을 따름)
+
+    // 2. TTS 엔진에 설정 적용
     tts?.setPitch(pitch)
     tts?.setSpeechRate(speed)
 
+    // 3. 말하기
     tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "ID")
   }
 
