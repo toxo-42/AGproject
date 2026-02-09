@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.*
 import android.bluetooth.le.*
@@ -328,6 +329,7 @@ class BleService : Service() {
       .setContentTitle("PeOb")
       .setContentText(content)
       .setSmallIcon(android.R.drawable.ic_dialog_info)
+      .setContentIntent(getPendingIntent())
       .setOngoing(true)
       .build()
   }
@@ -482,10 +484,22 @@ class BleService : Service() {
       .setPriority(NotificationCompat.PRIORITY_HIGH) // 중요도 최상
       .setDefaults(Notification.DEFAULT_ALL) // 소리/진동 기본값 사용
       .setAutoCancel(true) // 터치하면 사라짐
+      .setContentIntent(getPendingIntent())
       .build()
 
     // 중요: ID를 1번(서비스용)과 다르게 999번(경고용)으로 줍니다.
     manager.notify(999, notification)
   }
 
+  private fun getPendingIntent(): PendingIntent? {
+    val intent = Intent(this, MainActivity::class.java)
+    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+
+    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      PendingIntent.FLAG_IMMUTABLE
+    } else {
+      PendingIntent.FLAG_UPDATE_CURRENT
+    }
+    return PendingIntent.getActivity(this,0, intent, flags)
+  }
 }
