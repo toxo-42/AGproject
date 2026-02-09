@@ -123,15 +123,15 @@ class MainActivity : AppCompatActivity() {
     updateUI()
   }
 
-//  override fun onPause() {
-//    super.onPause()
-//    // 앱이 백그라운드로 가면 라디오 끄기 (배터리 절약)
-//    try {
-//      unregisterReceiver(statusReceiver)
-//    } catch (_: IllegalArgumentException) {
-//      // 이미 꺼져있으면 패스
-//    }
-//  }
+  override fun onPause() {
+    super.onPause()
+    // 앱이 백그라운드로 가면 라디오 끄기 (배터리 절약)
+    try {
+      unregisterReceiver(statusReceiver)
+    } catch (_: IllegalArgumentException) {
+      // 이미 꺼져있으면 패스
+    }
+  }
 
   // --- 시스템 제어 로직 ---
   private fun toggleSystem() {
