@@ -285,6 +285,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
         }
       }
     }
+  }
 
   private fun speakOut(text: String) {
     // 1. 설정값 불러오기
@@ -302,7 +303,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     // 3. 말하기
     tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "ID")
   }
-
+  
   private fun startForegroundServiceNotification(content: String) {
     val notification = createNotification(content)
     if (Build.VERSION.SDK_INT >= 34) {
