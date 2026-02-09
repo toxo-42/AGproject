@@ -25,64 +25,40 @@
         android:layout_marginBottom="24dp"/>
 
     <TextView
-        android:text="목소리 톤 (높낮이)"
-        android:textColor="#CCCCCC"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"/>
-
-    <SeekBar
-        android:id="@+id/seekPitch"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:max="20"
-        android:progress="10"
-        android:progressTint="@color/accent_blue"
-        android:thumbTint="@color/accent_blue"
-        android:layout_marginTop="8dp"
-        android:layout_marginBottom="20dp"/>
-
-    <TextView
-        android:text="말하기 속도 (빠르기)"
-        android:textColor="#CCCCCC"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"/>
-
-    <SeekBar
-        android:id="@+id/seekSpeed"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:max="20"
-        android:progress="10"
-        android:progressTint="@color/accent_blue"
-        android:thumbTint="@color/accent_blue"
-        android:layout_marginTop="8dp"
-        android:layout_marginBottom="24dp"/>
-
-    <TextView
-        android:text="음성 엔진 설정"
+        android:text="목소리 성별 선택"
         android:textColor="#CCCCCC"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"/>
+        android:layout_marginBottom="10dp"/>
 
-    <TextView
-        android:text="목소리 성별 변경은 시스템 설정에서 가능합니다."
-        android:textColor="#888888"
-        android:textSize="12sp"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"/>
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnOpenSystemTTS"
+    <RadioGroup
+        android:id="@+id/rgGender"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="휴대폰 음성 설정 열기"
-        android:textColor="#FFFFFF"
-        android:backgroundTint="#444444"
-        app:icon="@android:drawable/ic_menu_manage"
-        app:iconTint="#FFFFFF"
-        android:layout_marginBottom="16dp"/>
+        android:orientation="horizontal"
+        android:layout_marginBottom="24dp">
+
+      <RadioButton
+          android:id="@+id/rbFemale"
+          android:layout_width="0dp"
+          android:layout_weight="1"
+          android:layout_height="wrap_content"
+          android:text="여성"
+          android:textColor="#FFFFFF"
+          android:buttonTint="#00E5FF"
+          android:checked="true"/>
+
+      <RadioButton
+          android:id="@+id/rbMale"
+          android:layout_width="0dp"
+          android:layout_weight="1"
+          android:layout_height="wrap_content"
+          android:text="남성"
+          android:textColor="#FFFFFF"
+          android:buttonTint="#00E5FF"/>
+    </RadioGroup>
+
+
 
     <LinearLayout
         android:layout_width="match_parent"

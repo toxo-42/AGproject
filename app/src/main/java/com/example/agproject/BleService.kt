@@ -7,18 +7,16 @@ import android.app.NotificationManager
 import android.app.Service
 import android.bluetooth.*
 import android.bluetooth.le.*
-import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.*
 
-class BleService : Service(), TextToSpeech.OnInitListener {
+class BleService : Service() {
 
   private val channelId = "BleServiceChannel"
   private val tag = "BleService"
@@ -28,7 +26,6 @@ class BleService : Service(), TextToSpeech.OnInitListener {
   private var bluetoothAdapter: BluetoothAdapter? = null
   private var bluetoothLeScanner: BluetoothLeScanner? = null
   private var bluetoothGatt: BluetoothGatt? = null
-  private var tts: TextToSpeech? = null
 
   // 에러 팝업이 떠있는지 체크하는 변수
   private var isErrorDialogShowing = false
@@ -41,28 +38,6 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
     bluetoothAdapter = bluetoothManager.adapter
     bluetoothLeScanner = bluetoothAdapter?.bluetoothLeScanner
-    tts = TextToSpeech(this, this)
-  }
-
-  override fun onInit(status: Int) {
-    if (status == TextToSpeech.SUCCESS) {
-      val result = tts?.setLanguage(Locale.KOREAN)
-      if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-        Log.e(tag, "이 언어는 지원되지 않습니다.")
-      } else {
-        val voiceList = tts?.voices
-        val femaleVoice = voiceList?.find {
-          it.locale.language == "ko" && it.name.contains("female", ignoreCase = true)
-        }
-        if (femaleVoice != null) {
-          tts?.voice = femaleVoice
-        }
-        tts?.setPitch(1.1f)
-        tts?.setSpeechRate(1.3f)
-      }
-    } else {
-      Log.e(tag, "TTS 초기화 실패!")
-    }
   }
 
   @SuppressLint("ForegroundServiceType")
@@ -103,7 +78,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     // 1. 0xAA 바이트 준비
     val resetCommand = byteArrayOf(0xAA.toByte())
 
-    // 2. 735f (에러 채널)로 전송!
+    // 2. 735f (에러 채널)로 전송
     writeToErrorCharacteristic(resetCommand)
 
     // 3. 210ms 후 감시 재개
@@ -129,7 +104,6 @@ class BleService : Service(), TextToSpeech.OnInitListener {
 
   override fun onDestroy() {
     disconnectGatt()
-    tts?.shutdown()
     super.onDestroy()
   }
 
@@ -203,12 +177,11 @@ class BleService : Service(), TextToSpeech.OnInitListener {
         // 에러 특성은 write 용도지만, 일단 변수는 찾아둠 (나중에 쓰려고)
         val errCharacteristic = service?.getCharacteristic(errUuid)
 
-        // 2. 데이터 특성(735e) 구독 (여기서 MODULE_ERR가 들어옴)
+        // 데이터 특성(735e) 구독 (여기서 MODULE_ERR가 들어옴)
         if (characteristic != null) {
           enableNotification(gatt, characteristic)
 
           Log.i(tag, "데이터 채널(735e) 활성화 완료")
-          speakOut("시스템 가동. 감지를 시작합니다.")
 
           android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             sendTimeSyncBinary()
@@ -222,7 +195,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
           return
         }
 
-        // 3. 에러 특성(735f) 발견 확인 로그
+        // 에러 특성(735f) 발견 확인 로그
         if (errCharacteristic != null) {
           Log.i(tag, "에러 제어 채널(735f) 확인됨 (Ready to Write)")
         } else {
@@ -238,14 +211,16 @@ class BleService : Service(), TextToSpeech.OnInitListener {
       val receivedData = characteristic.getStringValue(0) ?: ""
       Log.d(tag, "수신된 데이터: $receivedData")
 
-      // 1. MODULE_ERR 체크 (735e로 들어오는 것 확실히 잡음)
+      // MODULE_ERR 체크
       if (receivedData.contains("MODULE_ERR")) {
         if (!isErrorDialogShowing) {
           isErrorDialogShowing = true // 깃발 올리기
 
           Log.w(tag, "[주의] 장치 오류 감지")
-          speakOut("장치 오류입니다. 장치를 점검해주세요.")
+          playVoiceFile("ERROR")
           updateNotification("주의: 장치 오류 발생")
+
+          showHeadsUpNotification("장치 오류", "장치를 점검해주세요!")
 
           // 메인 화면에 팝업 띄우라고 방송
           val intent = Intent("ACTION_MODULE_ERROR")
@@ -254,18 +229,21 @@ class BleService : Service(), TextToSpeech.OnInitListener {
         } else {
           Log.d(tag, "에러 중복 수신 무시됨 (사용자 확인 대기 중)")
         }
-        return // 처리 했으니 종료
+        return
       }
 
-      // 2. 나머지 데이터 체크
+      // 나머지 데이터 체크
       if (receivedData.contains("PEDAL_ERR")) {
-        Log.e(tag, "[위험] 페달 오조작 감지됨!")
-        speakOut("경고!!! 페달 조작을 확인하세요!!")
+        Log.e(tag, "[경고] 페달 오조작 감지됨!")
+        playVoiceFile("PEDAL")
         updateNotification("경고: 페달 오조작 감지됨!")
+        showHeadsUpNotification("위험! 페달 오조작!", "즉시 페달 위치를 확인하세요!!")
+
       } else if (receivedData.contains("NETWORK_ERR")) {
         Log.e(tag, "[주의] 모듈 통신 오류 감지됨!")
-        speakOut("기기 통신 시스템 오류입니다. 장치를 확인 해주세요.")
+        playVoiceFile("ERROR")
         updateNotification("주의: 기기 통신 시스템 오류!")
+        showHeadsUpNotification("통신 오류", "센서 연결 상태를 확인하세요.")
       } else {
         Log.i(tag, "정상 데이터 수신중: $receivedData")
       }
@@ -275,8 +253,11 @@ class BleService : Service(), TextToSpeech.OnInitListener {
         if(!isCapacityDialogShowing){
           isCapacityDialogShowing = true
 
-          Log.w(tag, "[경고] SD카드 용량 부족 감지됨!")
-          updateNotification("경고: SD카드 용량 부족")
+          Log.w(tag, "[주의] SD카드 용량 부족 감지됨!")
+          updateNotification("주의: SD카드 용량 부족")
+          showHeadsUpNotification(" 용량 부족", "SD카드 용량을 확인하세요.")
+          playVoiceFile("SD")
+
 
           val intent = Intent("ACTION_SD_CARD_WARNING")
           intent.setPackage(packageName)
@@ -287,21 +268,45 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     }
   }
 
-  private fun speakOut(text: String) {
-    // 1. 설정값 불러오기
-    val prefs = getSharedPreferences("AgPrefs", Context.MODE_PRIVATE)
+  private fun playVoiceFile(type: String) {
+    // 저장된 성별 확인
+    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    val gender = prefs.getString("TTS_GENDER", "female") ?: "female"
 
-    val pitch = prefs.getFloat("TTS_PITCH", 1.0f)
-    val speed = prefs.getFloat("TTS_SPEED", 1.0f) // 오타 수정됨!
+    // 상황과 성별에 맞는 MP3 파일 ID 찾기
+    var soundResId = 0
 
-    // (성별 로직 삭제: 시스템 설정을 따름)
+    if (gender == "male") {
+      // 남성일 때 파일 매칭
+      soundResId = when(type) {
+        "PEDAL" -> R.raw.voice_pedal_male
+        "SD" -> R.raw.voice_sd_male
+        "ERROR" -> R.raw.voice_error_male
+        else -> 0
+      }
+    } else {
+      // 여성일 때 파일 매칭
+      soundResId = when(type) {
+        "PEDAL" -> R.raw.voice_pedal_female
+        "SD" -> R.raw.voice_sd_female
+        "ERROR" -> R.raw.voice_error_female
+        else -> 0
+      }
+    }
 
-    // 2. TTS 엔진에 설정 적용
-    tts?.setPitch(pitch)
-    tts?.setSpeechRate(speed)
-
-    // 3. 말하기
-    tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "ID")
+    // 재생 (파일이 존재할 경우만)
+    if (soundResId != 0) {
+      try {
+        // MediaPlayer 생성 및 재생
+        val mediaPlayer = android.media.MediaPlayer.create(this, soundResId)
+        mediaPlayer.setOnCompletionListener {
+          it.release() // 재생 끝나면 메모리 청소
+        }
+        mediaPlayer.start()
+      } catch (e: Exception) {
+        Log.e(tag, "MP3 재생 실패: ${e.message}")
+      }
+    }
   }
 
   private fun startForegroundServiceNotification(content: String) {
@@ -329,7 +334,17 @@ class BleService : Service(), TextToSpeech.OnInitListener {
 
   private fun createNotificationChannel() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      val serviceChannel = NotificationChannel(channelId, "PeOb Channel", NotificationManager.IMPORTANCE_LOW)
+      // IMPORTANCE_LOW -> IMPORTANCE_HIGH 헤드업 알림 필수 조건!
+      val serviceChannel = NotificationChannel(
+        channelId,
+        "PeOb Safety Channel",
+        NotificationManager.IMPORTANCE_HIGH
+      )
+
+      // 알림 올 때 진동 Feedback
+      serviceChannel.enableVibration(true)
+      serviceChannel.description = "안전 장비의 긴급 경고를 알립니다."
+
       getSystemService(NotificationManager::class.java).createNotificationChannel(serviceChannel)
     }
   }
@@ -352,7 +367,7 @@ class BleService : Service(), TextToSpeech.OnInitListener {
     sendBroadcast(intent)
   }
 
-  // [기존] 데이터 전송용 (735e로 보냄 - 시간 동기화용)
+  // 데이터 전송용 (735e로 보냄 - 시간 동기화용)
   @SuppressLint("MissingPermission")
   private fun writeToModule(dataBytes: ByteArray) {
     if (bluetoothGatt == null) return
@@ -456,4 +471,21 @@ class BleService : Service(), TextToSpeech.OnInitListener {
       stopSelf()
     }, 500)
   }
+
+  private fun showHeadsUpNotification(title: String, content: String) {
+    val manager = getSystemService(NotificationManager::class.java)
+
+    val notification = NotificationCompat.Builder(this, channelId)
+      .setContentTitle(title)
+      .setContentText(content)
+      .setSmallIcon(android.R.drawable.stat_sys_warning) // 경고 아이콘
+      .setPriority(NotificationCompat.PRIORITY_HIGH) // 중요도 최상
+      .setDefaults(Notification.DEFAULT_ALL) // 소리/진동 기본값 사용
+      .setAutoCancel(true) // 터치하면 사라짐
+      .build()
+
+    // 중요: ID를 1번(서비스용)과 다르게 999번(경고용)으로 줍니다.
+    manager.notify(999, notification)
+  }
+
 }

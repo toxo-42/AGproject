@@ -36,7 +36,7 @@ class MainActivity : AppCompatActivity() {
   // 0: 대기, 1: 정상, 2: 에러(UUID 다름)
   private var connectionStatus= 0
 
-  // 방송(Broadcast)을 수신할 '라디오'를 만듭니다.
+  // Broadcast을 수신할 '라디오'생성
   private val statusReceiver = object : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
       when (intent?.action) {
@@ -70,23 +70,23 @@ class MainActivity : AppCompatActivity() {
       .apply(RequestOptions.bitmapTransform(BlurTransformation(25, 3)))
       .into(ivBackground)
 
-    // 2. UI 연결 (activity_main.xml의 ID와 연결)
+    // UI 연결 (activity_main.xml의 ID와 연결)
     cardCurrentTarget = findViewById(R.id.cardCurrentTarget)
     tvTargetName = findViewById(R.id.tvTargetName)
     tvTargetAddress = findViewById(R.id.tvTargetAddress)
     btnGoScan = findViewById(R.id.btnGoScan)
     btnGoManager = findViewById(R.id.btnGoManager)
 
-    // 3. 앱 켜자마자 권한 확인
+    // 앱 켜자마자 권한 확인
     checkPermissions()
 
-    // 4. [기능 1] '기기 검색' 버튼 클릭 -> ScanActivity 이동
+    // '기기 검색' 버튼 클릭 -> ScanActivity 이동
     btnGoScan.setOnClickListener {
       val intent = Intent(this, ScanActivity::class.java)
       startActivity(intent)
     }
 
-    // 5. [기능 2] '설정' 버튼 클릭 -> DeviceManagerActivity 이동
+    // '설정' 버튼 클릭 -> DeviceManagerActivity 이동
     btnGoManager.setOnClickListener {
       val intent = Intent(this, DeviceManagerActivity::class.java)
       // 현재 정보 넘겨주기 (선택 사항)
@@ -95,7 +95,7 @@ class MainActivity : AppCompatActivity() {
       startActivity(intent)
     }
 
-    // 6. [기능 3] 핵심! '중앙 카드'를 누르면 시스템 시작/정지 (구 btnToggle 기능)
+    // '중앙 카드'를 누르면 시스템 시작/정지 (구 btnToggle 기능)
     cardCurrentTarget.setOnClickListener {
       toggleSystem()
     }
@@ -115,7 +115,6 @@ class MainActivity : AppCompatActivity() {
       addAction("ACTION_SD_CARD_WARNING")
     }
 
-    // 빨간 줄, 노란 줄 모두 해결한 완벽한 코드
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       registerReceiver(statusReceiver, filter, RECEIVER_NOT_EXPORTED)
     } else {
@@ -124,15 +123,15 @@ class MainActivity : AppCompatActivity() {
     updateUI()
   }
 
-  override fun onPause() {
-    super.onPause()
-    // 앱이 백그라운드로 가면 라디오 끄기 (배터리 절약)
-    try {
-      unregisterReceiver(statusReceiver)
-    } catch (_: IllegalArgumentException) {
-      // 이미 꺼져있으면 패스
-    }
-  }
+//  override fun onPause() {
+//    super.onPause()
+//    // 앱이 백그라운드로 가면 라디오 끄기 (배터리 절약)
+//    try {
+//      unregisterReceiver(statusReceiver)
+//    } catch (_: IllegalArgumentException) {
+//      // 이미 꺼져있으면 패스
+//    }
+//  }
 
   // --- 시스템 제어 로직 ---
   private fun toggleSystem() {
@@ -247,7 +246,7 @@ class MainActivity : AppCompatActivity() {
     ActivityCompat.requestPermissions(this, permissions, 1)
   }
 
-  // 팝업 로직 완벽 수정!
+  // 팝업 로직
   private fun showErrorPopup() {
     val builder = androidx.appcompat.app.AlertDialog.Builder(this)
 
