@@ -19,9 +19,8 @@ import java.util.*
 
 class BleService : Service() {
 
-  private val channelId = "BleServiceChannel"
+  private val channelId = "BleCriticalChannel_v2"
   private val tag = "BleService"
-
   private var targetAddress: String? = null
 
   private var bluetoothAdapter: BluetoothAdapter? = null
@@ -57,6 +56,28 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
+    // 디버깅용 나중에 삭제
+    if (intent?.action == "ACTION_DEBUG_PEDAL") {
+      Log.w(tag, "🔧 디버깅: 페달 에러 시뮬레이션 시작")
+
+      // 1. 소리 재생
+      playVoiceFile("PEDAL")
+
+      // 2. 상단바 문구 변경
+      updateNotification("경고: 페달 오조작 감지됨! (TEST)")
+
+      // 3. 🚨 화면 깨우기 & 전체 화면 알림 (핵심!)
+      showCriticalNotification("🚨 [TEST] 위험! 페달 오조작!", "이것은 테스트입니다. 브레이크 확인!")
+
+      // 👇 [추가] 이거 넣으면 무조건 뜹니다! (테스트용 강제 실행)
+      val forceIntent = Intent(this, CriticalActivity::class.java)
+      forceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      startActivity(forceIntent)
+
+      return START_NOT_STICKY
+    }
+
+
     val newAddress = intent?.getStringExtra("TARGET_ADDRESS")
     if (newAddress != null) {
       targetAddress = newAddress
@@ -72,6 +93,7 @@ class BleService : Service() {
     startTargetScan()
 
     return START_NOT_STICKY
+
   }
 
   // 에러 해제 시퀀스
@@ -238,7 +260,7 @@ class BleService : Service() {
         Log.e(tag, "[경고] 페달 오조작 감지됨!")
         playVoiceFile("PEDAL")
         updateNotification("경고: 페달 오조작 감지됨!")
-        showHeadsUpNotification("위험! 페달 오조작!", "즉시 페달 위치를 확인하세요!!")
+        showCriticalNotification("위험! 페달 오조작!", "즉시 페달 위치를 확인하세요!!")
 
       } else if (receivedData.contains("NETWORK_ERR")) {
         Log.e(tag, "[주의] 모듈 통신 오류 감지됨!")
@@ -501,5 +523,34 @@ class BleService : Service() {
       PendingIntent.FLAG_UPDATE_CURRENT
     }
     return PendingIntent.getActivity(this,0, intent, flags)
+  }
+
+  // CriticalActivity를 깨우는 비상 알림 함수
+  private fun showCriticalNotification(title: String, content: String) {
+    val manager = getSystemService(NotificationManager::class.java)
+
+    // 1. 목표 변경: MainActivity -> CriticalActivity
+    val fullScreenIntent = Intent(this, CriticalActivity::class.java)
+    // 중요: 새로운 태스크로 실행해야 기존 앱 위에 덮어씌워지지 않고 독립적으로 뜸
+    fullScreenIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+
+    val fullScreenPendingIntent = android.app.PendingIntent.getActivity(
+      this,
+      999,
+      fullScreenIntent,
+      android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+    )
+
+    // 2. 알림 설정 (헤드업 + 전체화면)
+    val builder = NotificationCompat.Builder(this, channelId)
+      .setSmallIcon(android.R.drawable.stat_sys_warning)
+      .setContentTitle(title)
+      .setContentText(content)
+      .setPriority(NotificationCompat.PRIORITY_HIGH)
+      .setCategory(NotificationCompat.CATEGORY_ALARM)
+      .setFullScreenIntent(fullScreenPendingIntent, true) // 👈 여기가 핵심!
+      .setAutoCancel(true)
+
+    manager.notify(888, builder.build())
   }
 }

@@ -16,7 +16,10 @@
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+
 
 
     <application
@@ -38,7 +41,17 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
         </activity>
+
+        <activity
+            android:name=".CriticalActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:screenOrientation="fullSensor"
+            android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar" />
 
         <activity android:name=".ScanActivity" />
 

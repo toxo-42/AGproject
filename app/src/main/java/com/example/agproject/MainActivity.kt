@@ -29,6 +29,12 @@ class MainActivity : AppCompatActivity() {
   private lateinit var btnGoScan: MaterialButton
   private lateinit var btnGoManager: MaterialButton
 
+  private lateinit var layoutCriticalOverlay: androidx.constraintlayout.widget.ConstraintLayout
+
+  private lateinit var ivCriticalAlert: ImageView
+
+  private lateinit var btnResetNormal: com.google.android.material.button.MaterialButton
+
   private var isRunning = false
   private var targetAddress: String? = null
   private var targetName: String? = null
@@ -99,8 +105,18 @@ class MainActivity : AppCompatActivity() {
     cardCurrentTarget.setOnClickListener {
       toggleSystem()
     }
+    // 디버깅용 나중에 삭제
+    val tvAppTitle = findViewById<TextView>(R.id.tvAppTitle)
+    tvAppTitle.setOnLongClickListener {
+      Toast.makeText(this, "🔧 디버깅: 페달 오조작 강제 트리거!", Toast.LENGTH_SHORT).show()
 
+      // 서비스에게 "가짜 에러" 명령 내리기
+      val debugIntent = Intent(this, BleService::class.java)
+      debugIntent.action = "ACTION_DEBUG_PEDAL" // 비밀 암호
+      startService(debugIntent)
 
+      true // 이벤트 소비함 (짧은 클릭은 발생 안 함)
+    }
   }
 
   override fun onResume() {
@@ -113,6 +129,7 @@ class MainActivity : AppCompatActivity() {
       addAction("ACTION_UUID_MISMATCH")
       addAction("ACTION_MODULE_ERROR")
       addAction("ACTION_SD_CARD_WARNING")
+      addAction("ACTION_PEDAL_CRITICAL")
     }
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -295,4 +312,5 @@ class MainActivity : AppCompatActivity() {
     }
     dialog.show()
   }
+
 }
