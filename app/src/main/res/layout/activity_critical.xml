@@ -4,12 +4,11 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#1A0000"
+    android:background="@color/warning_red"
     android:keepScreenOn="true">
-  <View
-      android:layout_width="match_parent"
-      android:layout_height="match_parent"
-      android:background="@color/bg_dark" />
+
+  <!-- 배경 View 제거 또는 투명하게 -->
+  <!-- <View android:background="@color/bg_dark" /> 제거 -->
 
   <ImageView
       android:id="@+id/ivCriticalIcon"
@@ -20,7 +19,9 @@
       app:layout_constraintEnd_toEndOf="parent"
       app:layout_constraintStart_toStartOf="parent"
       app:layout_constraintTop_toTopOf="parent"
-      app:layout_constraintVertical_chainStyle="packed" app:layout_constraintHorizontal_bias="0.496"/>
+      app:layout_constraintVertical_chainStyle="packed"
+      app:layout_constraintHorizontal_bias="0.496"/>
+
   <TextView
       android:id="@+id/tvWarningTitle"
       android:layout_width="wrap_content"
@@ -28,7 +29,7 @@
       android:layout_marginTop="20dp"
       android:gravity="center"
       android:text=" WARNING "
-      android:textColor="#FF0000"
+      android:textColor="#FFFFFF"
       android:textSize="70sp"
       android:textStyle="bold"
       app:layout_constraintBottom_toTopOf="@+id/tvWarningSub"
@@ -58,14 +59,14 @@
       android:layout_marginHorizontal="20dp"
       android:layout_marginTop="50dp"
       android:layout_marginBottom="50dp"
-      android:backgroundTint="#D32F2F"
+      android:backgroundTint="@color/warning_button"
       android:text="상황 확인 / 경고 해제"
-      android:textColor="#FFFFFF"
+      android:textColor="#C62828"
       android:textSize="22sp"
       android:textStyle="bold"
       app:cornerRadius="16dp"
-      app:strokeColor="#FFFFFF"
-      app:strokeWidth="2dp"
+      app:strokeColor="@color/warning_button"
+      app:strokeWidth="3dp"
       app:layout_constraintBottom_toBottomOf="parent"
       app:layout_constraintEnd_toEndOf="parent"
       app:layout_constraintStart_toStartOf="parent"

@@ -67,7 +67,7 @@ class BleService : Service() {
       updateNotification("경고: 페달 오조작 감지됨! (TEST)")
 
       // 3. 🚨 화면 깨우기 & 전체 화면 알림 (핵심!)
-      showCriticalNotification("🚨 [TEST] 위험! 페달 오조작!", "이것은 테스트입니다. 브레이크 확인!")
+      showCriticalNotification("위험! 페달 오조작!", "즉시 페달 위치를 확인하세요!!")
 
       // 👇 [추가] 이거 넣으면 무조건 뜹니다! (테스트용 강제 실행)
       val forceIntent = Intent(this, CriticalActivity::class.java)
