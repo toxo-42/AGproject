@@ -57,25 +57,25 @@ class BleService : Service() {
     }
 
     // 디버깅용 나중에 삭제
-    if (intent?.action == "ACTION_DEBUG_PEDAL") {
-      Log.w(tag, "🔧 디버깅: 페달 에러 시뮬레이션 시작")
-
-      // 1. 소리 재생
-      playVoiceFile("PEDAL")
-
-      // 2. 상단바 문구 변경
-      updateNotification("경고: 페달 오조작 감지됨! (TEST)")
-
-      // 3. 🚨 화면 깨우기 & 전체 화면 알림 (핵심!)
-      showCriticalNotification("위험! 페달 오조작!", "즉시 페달 위치를 확인하세요!!")
-
-      // 👇 [추가] 이거 넣으면 무조건 뜹니다! (테스트용 강제 실행)
-      val forceIntent = Intent(this, CriticalActivity::class.java)
-      forceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      startActivity(forceIntent)
-
-      return START_NOT_STICKY
-    }
+//    if (intent?.action == "ACTION_DEBUG_PEDAL") {
+//      Log.w(tag, "🔧 디버깅: 페달 에러 시뮬레이션 시작")
+//
+//      // 1. 소리 재생
+//      playVoiceFile("PEDAL")
+//
+//      // 2. 상단바 문구 변경
+//      updateNotification("경고: 페달 오조작 감지됨! (TEST)")
+//
+//      // 3. 🚨 화면 깨우기 & 전체 화면 알림 (핵심!)
+//      showCriticalNotification("위험! 페달 오조작!", "즉시 페달 위치를 확인하세요!!")
+//
+//      // 👇 [추가] 이거 넣으면 무조건 뜹니다! (테스트용 강제 실행)
+//      val forceIntent = Intent(this, CriticalActivity::class.java)
+//      forceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+//      startActivity(forceIntent)
+//
+//      return START_NOT_STICKY
+//    }
 
 
     val newAddress = intent?.getStringExtra("TARGET_ADDRESS")
@@ -255,22 +255,39 @@ class BleService : Service() {
         return
       }
 
-      // 나머지 데이터 체크
+      // Pedal_err logic
       if (receivedData.contains("PEDAL_ERR")) {
-        Log.e(tag, "[경고] 페달 오조작 감지됨!")
+        Log.e(tag, "[실제상황] 페달 오조작 감지됨! (Critical Alert)")
+
+        // 1. 소리 & 상단바 알림
         playVoiceFile("PEDAL")
-        updateNotification("경고: 페달 오조작 감지됨!")
-        showCriticalNotification("위험! 페달 오조작!", "즉시 페달 위치를 확인하세요!!")
+        updateNotification("위험! 페달 오조작 감지됨!")
 
-      } else if (receivedData.contains("NETWORK_ERR")) {
-        Log.e(tag, "[주의] 모듈 통신 오류 감지됨!")
-        playVoiceFile("ERROR")
-        updateNotification("주의: 기기 통신 시스템 오류!")
-        showHeadsUpNotification("통신 오류", "센서 연결 상태를 확인하세요.")
-      } else {
-        Log.i(tag, "정상 데이터 수신중: $receivedData")
+        // 2. [Lock Screen 대응] 화면이 꺼져있을 때 깨우는 알림
+        showCriticalNotification("위험! 페달 오조작!", "즉시 브레이크를 확인하세요!!")
+
+        // 3. [Background 대응] 앱이 켜져있거나 백그라운드일 때 강제 화면 전환
+        // 권한이 있는지 확인하고 실행해야 안 튕깁니다!
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+          if (android.provider.Settings.canDrawOverlays(this@BleService)) {
+            try {
+              val forceIntent = Intent(this@BleService, CriticalActivity::class.java)
+              forceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+              startActivity(forceIntent)
+              Log.i(tag, "[성공] Overlay 권한으로 화면 강제 전환")
+            } catch (e: Exception) {
+              Log.e(tag, "액티비티 강제 실행 실패: ${e.message}")
+            }
+          } else {
+            Log.w(tag, "Overlay 권한 없음: 백그라운드 화면 전환 불가 (헤드업 알림만 뜸)")
+          }
+        } else {
+          // 옛날 폰(Android 9 이하)은 권한 없이도 그냥 됩니다.
+          val forceIntent = Intent(this@BleService, CriticalActivity::class.java)
+          forceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+          startActivity(forceIntent)
+        }
       }
-
 
       if (receivedData.contains("SD_SMALL")){
         if(!isCapacityDialogShowing){

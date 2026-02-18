@@ -85,6 +85,7 @@ class MainActivity : AppCompatActivity() {
 
     // 앱 켜자마자 권한 확인
     checkPermissions()
+    checkOverlayPermission()
 
     // '기기 검색' 버튼 클릭 -> ScanActivity 이동
     btnGoScan.setOnClickListener {
@@ -105,18 +106,18 @@ class MainActivity : AppCompatActivity() {
     cardCurrentTarget.setOnClickListener {
       toggleSystem()
     }
-    // 디버깅용 나중에 삭제
-    val tvAppTitle = findViewById<TextView>(R.id.tvAppTitle)
-    tvAppTitle.setOnLongClickListener {
-      Toast.makeText(this, "🔧 디버깅: 페달 오조작 강제 트리거!", Toast.LENGTH_SHORT).show()
-
-      // 서비스에게 "가짜 에러" 명령 내리기
-      val debugIntent = Intent(this, BleService::class.java)
-      debugIntent.action = "ACTION_DEBUG_PEDAL" // 비밀 암호
-      startService(debugIntent)
-
-      true // 이벤트 소비함 (짧은 클릭은 발생 안 함)
-    }
+//    // 디버깅용 나중에 삭제
+//    val tvAppTitle = findViewById<TextView>(R.id.tvAppTitle)
+//    tvAppTitle.setOnLongClickListener {
+//      Toast.makeText(this, "🔧 디버깅: 페달 오조작 강제 트리거!", Toast.LENGTH_SHORT).show()
+//
+//      // 서비스에게 "가짜 에러" 명령 내리기
+//      val debugIntent = Intent(this, BleService::class.java)
+//      debugIntent.action = "ACTION_DEBUG_PEDAL" // 비밀 암호
+//      startService(debugIntent)
+//
+//      true // 이벤트 소비함 (짧은 클릭은 발생 안 함)
+//    }
   }
 
   override fun onResume() {
@@ -313,4 +314,17 @@ class MainActivity : AppCompatActivity() {
     dialog.show()
   }
 
+  // 👇 [추가] 다른 앱 위에 그리기 권한 요청 (백그라운드 실행 필수)
+  private fun checkOverlayPermission() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      if (!android.provider.Settings.canDrawOverlays(this)) {
+        Toast.makeText(this, "비상 시 화면을 띄우기 위해 '다른 앱 위에 표시' 권한이 필요합니다.", Toast.LENGTH_LONG).show()
+        val intent = Intent(
+          android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+          android.net.Uri.parse("package:$packageName")
+        )
+        startActivityForResult(intent, 1234)
+      }
+    }
+  }
 }
