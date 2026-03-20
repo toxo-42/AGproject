@@ -565,7 +565,7 @@ class BleService : Service() {
       .setContentText(content)
       .setPriority(NotificationCompat.PRIORITY_HIGH)
       .setCategory(NotificationCompat.CATEGORY_ALARM)
-      .setFullScreenIntent(fullScreenPendingIntent, true) // 👈 여기가 핵심!
+      .setFullScreenIntent(fullScreenPendingIntent, true)
       .setAutoCancel(true)
 
     manager.notify(888, builder.build())

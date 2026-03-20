@@ -30,13 +30,7 @@ class DeviceManagerActivity : AppCompatActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_device_manager)
-
-    // 1. TTS 초기화
-    tts = TextToSpeech(this) { status ->
-      if (status != TextToSpeech.ERROR) {
-        tts?.language = Locale.KOREAN
-      }
-    }
+    
 
     // 2. ID 연결
     etDeviceName = findViewById(R.id.etDeviceName)
