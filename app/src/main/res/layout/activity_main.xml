@@ -132,7 +132,7 @@
             android:layout_marginStart="8dp"
             android:text="@string/btn_manage"
             android:textColor="#101820"
-            android:textSize="16dp"
+            android:textSize="15dp"
             android:background="@drawable/bg_mint_gradient"
             app:backgroundTint="@null"
             app:strokeColor="#101820"
