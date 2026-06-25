@@ -13,6 +13,9 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
+import org.json.JSONObject
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.*
@@ -32,12 +35,63 @@ class BleService : Service() {
 
   private var isCapacityDialogShowing = false
 
+  // notify 구독은 GATT 작업이 직렬화되므로 한 번에 하나씩 -> 큐로 순차 처리
+  private val notifyQueue = kotlin.collections.ArrayDeque<BluetoothGattCharacteristic>()
+
+  // ── 페달 오조작 로컬 판정용 (Python judge 호출) ──────────────────
+  // RAW 샘플을 모았다가 윈도우가 차면 Python judge_json 에 통째로 넘긴다.
+  // 윈도잉 책임은 Kotlin 쪽(여기). Python은 판정만 한다.
+  private val sampleBuffer = ArrayList<List<Double>>(WINDOW_SIZE)
+  private var lastMisopShown = false   // 같은 오조작 연속 트리거 방지(예시)
+
+  companion object {
+    // Nordic UART Service (NUS) 표준 UUID
+    private val NUS_SERVICE = UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
+    private val NUS_RX = UUID.fromString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E") // 폰 -> 기기 (Write)
+    private val NUS_TX = UUID.fromString("6E400003-B5A3-F393-E0A9-E50E24DCCA9E") // 기기 -> 폰 (Notify, 문자열)
+
+    // 대용량 raw 바이너리 전용 attr (TODO: 펌웨어 쪽 UUID 확정되면 교체)
+    private val RAW_DATA = UUID.fromString("6E400004-B5A3-F393-E0A9-E50E24DCCA9E") // 기기 -> 폰 (Notify, raw)
+
+    // CCCD: notify on/off 표준 디스크립터
+    private val CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+    // ── RAW 디코딩 포맷 (임시값, 펌웨어 확정 시 이 3개만 교체) ──────────
+    // 샘플 1개 = accel(uint16 LE) + brake(uint16 LE) = 4 bytes
+    private const val BYTES_PER_SAMPLE = 4
+    private const val ADC_MAX = 4095.0        // 12bit ADC 가정 (0~4095 -> 0.0~1.0)
+    private const val WINDOW_SIZE = 50        // 50Hz * 1초 = 50샘플마다 판정
+  }
+
   override fun onCreate() {
     super.onCreate()
     createNotificationChannel()
     val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
     bluetoothAdapter = bluetoothManager.adapter
     bluetoothLeScanner = bluetoothAdapter?.bluetoothLeScanner
+
+    // Chaquopy Python 런타임 시작 (앱 생명주기 동안 한 번만)
+    if (!Python.isStarted()) {
+      Python.start(AndroidPlatform(this))
+    }
+    selfTestJudge() // 연동 관통 확인용 (실데이터 없을 때)
+  }
+
+  // judge.py 가 안드로이드 안에서 실제로 호출되는지 확인하는 자가진단.
+  // 더미 윈도우 하나를 만들어 호출하고 결과 JSON 을 Logcat 에 찍는다.
+  // RAW 디코딩/실데이터 연동이 끝나면 제거해도 된다.
+  private fun selfTestJudge() {
+    try {
+      val dummy = org.json.JSONArray()
+      repeat(WINDOW_SIZE) { dummy.put(org.json.JSONArray(listOf(0.95, 0.0))) } // 전형적 오조작 패턴
+      val resultJson = Python.getInstance()
+        .getModule("judge")
+        .callAttr("judge_json", dummy.toString())
+        .toString()
+      Log.i(tag, "[Chaquopy 자가진단] judge_json -> $resultJson")
+    } catch (e: Exception) {
+      Log.e(tag, "[Chaquopy 자가진단] 실패: ${e.message}", e)
+    }
   }
 
   @SuppressLint("ForegroundServiceType")
@@ -55,28 +109,6 @@ class BleService : Service() {
 
       return START_NOT_STICKY
     }
-
-    // 디버깅용 나중에 삭제
-//    if (intent?.action == "ACTION_DEBUG_PEDAL") {
-//      Log.w(tag, "🔧 디버깅: 페달 에러 시뮬레이션 시작")
-//
-//      // 1. 소리 재생
-//      playVoiceFile("PEDAL")
-//
-//      // 2. 상단바 문구 변경
-//      updateNotification("경고: 페달 오조작 감지됨! (TEST)")
-//
-//      // 3. 🚨 화면 깨우기 & 전체 화면 알림 (핵심!)
-//      showCriticalNotification("위험! 페달 오조작!", "즉시 페달 위치를 확인하세요!!")
-//
-//      // 👇 [추가] 이거 넣으면 무조건 뜹니다! (테스트용 강제 실행)
-//      val forceIntent = Intent(this, CriticalActivity::class.java)
-//      forceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-//      startActivity(forceIntent)
-//
-//      return START_NOT_STICKY
-//    }
-
 
     val newAddress = intent?.getStringExtra("TARGET_ADDRESS")
     if (newAddress != null) {
@@ -101,8 +133,8 @@ class BleService : Service() {
     // 1. 0xAA 바이트 준비
     val resetCommand = byteArrayOf(0xAA.toByte())
 
-    // 2. 735f (에러 채널)로 전송
-    writeToErrorCharacteristic(resetCommand)
+    // 2. RX 채널로 전송
+    writeToRx(resetCommand)
 
     // 3. 210ms 후 감시 재개
     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
@@ -115,8 +147,8 @@ class BleService : Service() {
     //1. 0xAB byte 준비
     val comfirmCommend = byteArrayOf(0xAB.toByte())
 
-    //2. 735f channel transmission
-    writeToErrorCharacteristic(comfirmCommend)
+    //2. RX 채널로 전송
+    writeToRx(comfirmCommend)
 
     //3. 210ms 이후 감시 재개
     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
@@ -189,123 +221,147 @@ class BleService : Service() {
 
     @SuppressLint("MissingPermission")
     override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
-      if (status == BluetoothGatt.GATT_SUCCESS) {
-        val serviceUuid = UUID.fromString("d74d5c87-3d2b-46b3-b8a8-d64ca4917301")
-        val charUuid = UUID.fromString("d74d5c87-3d2b-46b3-b8a8-d64ca491735e") // 데이터용
-        val errUuid = UUID.fromString("d74d5c87-3d2b-46b3-b8a8-d64ca491735f")  // 에러 제어용
-
-        val service = gatt?.getService(serviceUuid)
-        val characteristic = service?.getCharacteristic(charUuid)
-
-        // 에러 특성은 write 용도지만, 일단 변수는 찾아둠 (나중에 쓰려고)
-        val errCharacteristic = service?.getCharacteristic(errUuid)
-
-        // 데이터 특성(735e) 구독 (여기서 MODULE_ERR가 들어옴)
-        if (characteristic != null) {
-          enableNotification(gatt, characteristic)
-
-          Log.i(tag, "데이터 채널(735e) 활성화 완료")
-
-          android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            sendTimeSyncBinary()
-          }, 500)
-
-          saveStatus("정상 연결")
-          sendBroadcastToActivity("ACTION_UUID_MATCHED")
-        } else {
-          Log.e(tag, "주요 특성(735e) 없음")
-          handleUuidMismatch()
-          return
-        }
-
-        // 에러 특성(735f) 발견 확인 로그
-        if (errCharacteristic != null) {
-          Log.i(tag, "에러 제어 채널(735f) 확인됨 (Ready to Write)")
-        } else {
-          Log.w(tag, "에러 제어 채널(735f)을 찾을 수 없음")
-        }
-      } else {
+      if (status != BluetoothGatt.GATT_SUCCESS) {
         Log.w(tag, "서비스 발견 실패: $status")
-      }
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-      val receivedData = characteristic.getStringValue(0) ?: ""
-      Log.d(tag, "수신된 데이터: $receivedData")
-
-      // MODULE_ERR 체크
-      if (receivedData.contains("MODULE_ERR")) {
-        if (!isErrorDialogShowing) {
-          isErrorDialogShowing = true // 깃발 올리기
-
-          Log.w(tag, "[주의] 장치 오류 감지")
-          playVoiceFile("ERROR")
-          updateNotification("주의: 장치 오류 발생")
-
-          showHeadsUpNotification("장치 오류", "장치를 점검해주세요!")
-
-          // 메인 화면에 팝업 띄우라고 방송
-          val intent = Intent("ACTION_MODULE_ERROR")
-          intent.setPackage(packageName)
-          sendBroadcast(intent)
-        } else {
-          Log.d(tag, "에러 중복 수신 무시됨 (사용자 확인 대기 중)")
-        }
         return
       }
 
-      // Pedal_err logic
-      if (receivedData.contains("PEDAL_ERR")) {
-        Log.e(tag, "[실제상황] 페달 오조작 감지됨! (Critical Alert)")
+      val service = gatt?.getService(NUS_SERVICE)
+      val txChar = service?.getCharacteristic(NUS_TX)   // 문자열 수신
+      val rawChar = service?.getCharacteristic(RAW_DATA) // raw 수신
 
-        // 1. 소리 & 상단바 알림
-        playVoiceFile("PEDAL")
-        updateNotification("위험! 페달 오조작 감지됨!")
-
-        // 2. [Lock Screen 대응] 화면이 꺼져있을 때 깨우는 알림
-        showCriticalNotification("위험! 페달 오조작!", "즉시 브레이크를 확인하세요!!")
-
-        // 3. [Background 대응] 앱이 켜져있거나 백그라운드일 때 강제 화면 전환
-        // 권한이 있는지 확인하고 실행해야 안 튕깁니다!
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-          if (android.provider.Settings.canDrawOverlays(this@BleService)) {
-            try {
-              val forceIntent = Intent(this@BleService, CriticalActivity::class.java)
-              forceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-              startActivity(forceIntent)
-              Log.i(tag, "[성공] Overlay 권한으로 화면 강제 전환")
-            } catch (e: Exception) {
-              Log.e(tag, "액티비티 강제 실행 실패: ${e.message}")
-            }
-          } else {
-            Log.w(tag, "Overlay 권한 없음: 백그라운드 화면 전환 불가 (헤드업 알림만 뜸)")
-          }
-        } else {
-          // 옛날 폰(Android 9 이하)은 권한 없이도 그냥 됩니다.
-          val forceIntent = Intent(this@BleService, CriticalActivity::class.java)
-          forceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-          startActivity(forceIntent)
-        }
+      // TX(문자열)는 필수. 없으면 잘못된 기기
+      if (txChar == null) {
+        Log.e(tag, "NUS TX 특성($NUS_TX) 없음")
+        handleUuidMismatch()
+        return
       }
 
-      if (receivedData.contains("SD_SMALL")){
-        if(!isCapacityDialogShowing){
-          isCapacityDialogShowing = true
+      // 구독 대상 큐에 적재 (TX -> RAW 순서로 하나씩 구독)
+      notifyQueue.clear()
+      notifyQueue.add(txChar)
+      if (rawChar != null) {
+        notifyQueue.add(rawChar)
+      } else {
+        Log.w(tag, "RAW 채널($RAW_DATA) 없음 (펌웨어 미구현?)")
+      }
 
-          Log.w(tag, "[주의] SD카드 용량 부족 감지됨!")
-          updateNotification("주의: SD카드 용량 부족")
-          showHeadsUpNotification(" 용량 부족", "SD카드 용량을 확인하세요.")
-          playVoiceFile("SD")
+      saveStatus("정상 연결")
+      sendBroadcastToActivity("ACTION_UUID_MATCHED")
 
+      subscribeNext(gatt) // 첫 구독 시작 -> 이후 onDescriptorWrite 콜백으로 이어짐
+    }
 
-          val intent = Intent("ACTION_SD_CARD_WARNING")
-          intent.setPackage(packageName)
-          sendBroadcast(intent)
+    // 구독 한 건 완료될 때마다 호출 -> 다음 대상 구독, 큐가 비면 시간 동기화
+    override fun onDescriptorWrite(gatt: BluetoothGatt?, descriptor: BluetoothGattDescriptor?, status: Int) {
+      subscribeNext(gatt)
+    }
 
-        }
+    override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+      when (characteristic.uuid) {
+        NUS_TX -> handleTextMessage(characteristic.getStringValue(0) ?: "")
+        RAW_DATA -> handleRawData(characteristic.value ?: ByteArray(0))
+        else -> Log.d(tag, "알 수 없는 특성 수신: ${characteristic.uuid}")
       }
     }
+  }
+
+  // 큐에서 다음 특성을 꺼내 notify 구독. 비어 있으면 모든 구독 완료로 보고 시간 동기화.
+  @SuppressLint("MissingPermission")
+  private fun subscribeNext(gatt: BluetoothGatt?) {
+    val next = notifyQueue.removeFirstOrNull()
+    if (next == null) {
+      Log.i(tag, "모든 notify 구독 완료 -> 시간 동기화 전송")
+      sendTimeSyncBinary()
+      return
+    }
+    Log.i(tag, "notify 구독 시작: ${next.uuid}")
+    enableNotification(gatt, next)
+  }
+
+  // ── 기기 -> 폰 문자열 메시지 처리 ─────────────────────────────
+  // TODO: 에러 구조 전면 개편 예정. 지금은 패턴 예시 하나(MODULE_ERR)만 구현.
+  //       새 구조 확정되면 아래 when 분기에 케이스만 추가하면 됨.
+  private fun handleTextMessage(msg: String) {
+    Log.d(tag, "수신(TX): $msg")
+    when {
+      msg.contains("MODULE_ERR") -> onModuleError()
+      // TODO: SD_SMALL 등 새 에러 구조에 맞춰 케이스 추가
+      //       (엑셀/페달 오조작은 더 이상 문자열로 받지 않음 -> RAW 데이터 로컬 판단으로 이관)
+    }
+  }
+
+  // [예시] 모듈 오류 처리: 중복 수신은 사용자 확인 전까지 무시
+  private fun onModuleError() {
+    if (isErrorDialogShowing) {
+      Log.d(tag, "에러 중복 수신 무시 (사용자 확인 대기 중)")
+      return
+    }
+    isErrorDialogShowing = true
+
+    Log.w(tag, "[주의] 장치 오류 감지")
+    playVoiceFile("ERROR")
+    updateNotification("주의: 장치 오류 발생")
+    showHeadsUpNotification("장치 오류", "장치를 점검해주세요!")
+    sendBroadcastToActivity("ACTION_MODULE_ERROR")
+  }
+
+  // ── 기기 -> 폰 raw 바이너리 처리 (엑셀/페달 오조작 로컬 판단 입력부) ──────────
+  // 기기가 간헐적으로 보내는 ~50Hz 센서 데이터가 여기로 들어온다.
+  // TODO: 1) 바이트 -> 샘플 디코딩  2) 윈도우 버퍼링  3) 로컬 판단(파이썬 모델 결과 회수)
+  //       4) 오조작 판정 시 경고 트리거.  (기존 MCU 측 PEDAL_ERR 문자열 감지 대체)
+  private fun handleRawData(data: ByteArray) {
+    Log.d(tag, "수신(RAW): ${data.size} bytes")
+
+    // 1) 바이트 -> [accel, brake] 샘플 디코딩 (4바이트씩 끊어 읽기)
+    val buf = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
+    while (buf.remaining() >= BYTES_PER_SAMPLE) {
+      val accel = (buf.short.toInt() and 0xFFFF) / ADC_MAX
+      val brake = (buf.short.toInt() and 0xFFFF) / ADC_MAX
+      sampleBuffer.add(listOf(accel, brake))
+    }
+
+    // 2) 윈도우가 차면 Python judge 호출 후 버퍼 비움
+    if (sampleBuffer.size >= WINDOW_SIZE) {
+      val window = ArrayList(sampleBuffer)   // 복사본 전달
+      sampleBuffer.clear()
+      judgeWindow(window)
+    }
+  }
+
+  // 윈도우 하나를 Python judge_json 에 넘겨 오조작 여부를 판정한다.
+  private fun judgeWindow(window: List<List<Double>>) {
+    try {
+      // 윈도우를 JSON 문자열로 직렬화해 전달 (Chaquopy ArrayList 변환 이슈 회피)
+      val samplesJson = org.json.JSONArray()
+      for (sample in window) samplesJson.put(org.json.JSONArray(sample))
+      val resultJson = Python.getInstance()
+        .getModule("judge")
+        .callAttr("judge_json", samplesJson.toString())
+        .toString()
+      val result = JSONObject(resultJson)
+      val misop = result.getBoolean("misop")
+      val score = result.getDouble("score")
+      Log.d(tag, "판정: misop=$misop score=$score")
+
+      if (misop && !lastMisopShown) {
+        lastMisopShown = true
+        onPedalMisoperation()
+      } else if (!misop) {
+        lastMisopShown = false // 정상으로 돌아오면 다음 오조작 다시 경고
+      }
+    } catch (e: Exception) {
+      Log.e(tag, "judge 호출 실패: ${e.message}", e)
+    }
+  }
+
+  // 페달 오조작 감지 시 경고 트리거 (기존 음성/헤드업 알림 재사용)
+  private fun onPedalMisoperation() {
+    Log.w(tag, "[경고] 페달 오조작 감지")
+    playVoiceFile("SD")
+    updateNotification("주의: 페달 오조작 감지")
+    showHeadsUpNotification("페달 오조작", "브레이크를 확인하세요!")
+    sendBroadcastToActivity("ACTION_PEDAL_MISOP")
   }
 
   private fun playVoiceFile(type: String) {
@@ -319,7 +375,6 @@ class BleService : Service() {
     if (gender == "male") {
       // 남성일 때 파일 매칭
       soundResId = when(type) {
-        "PEDAL" -> R.raw.voice_pedal_male
         "SD" -> R.raw.voice_sd_male
         "ERROR" -> R.raw.voice_error_male
         else -> 0
@@ -327,7 +382,6 @@ class BleService : Service() {
     } else {
       // 여성일 때 파일 매칭
       soundResId = when(type) {
-        "PEDAL" -> R.raw.voice_pedal_female
         "SD" -> R.raw.voice_sd_female
         "ERROR" -> R.raw.voice_error_female
         else -> 0
@@ -408,66 +462,34 @@ class BleService : Service() {
     sendBroadcast(intent)
   }
 
-  // 데이터 전송용 (735e로 보냄 - 시간 동기화용)
+  // 폰 -> 기기 전송 (NUS RX 단일 채널). 시간 동기화/0xAA/0xAB 모두 이 함수로.
   @SuppressLint("MissingPermission")
-  private fun writeToModule(dataBytes: ByteArray) {
-    if (bluetoothGatt == null) return
-
-    val serviceUuid = UUID.fromString("d74d5c87-3d2b-46b3-b8a8-d64ca4917301")
-    val charUuid = UUID.fromString("d74d5c87-3d2b-46b3-b8a8-d64ca491735e") // 735e
-
-    val service = bluetoothGatt?.getService(serviceUuid)
-    val characteristic = service?.getCharacteristic(charUuid)
-
-    if (characteristic != null) {
-      val writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        bluetoothGatt?.writeCharacteristic(characteristic, dataBytes, writeType)
-      } else {
-        characteristic.writeType = writeType
-        characteristic.value = dataBytes
-        @Suppress("DEPRECATION")
-        bluetoothGatt?.writeCharacteristic(characteristic)
-      }
-    }
-  }
-
-  // 에러 해제 전송용 (735f로 보냄 - 0xAA 전송용)
-  @SuppressLint("MissingPermission")
-  private fun writeToErrorCharacteristic(dataBytes: ByteArray) {
-    if (bluetoothGatt == null) {
+  private fun writeToRx(dataBytes: ByteArray) {
+    val gatt = bluetoothGatt ?: run {
       Log.e(tag, "연결된 기기가 없어 전송 실패")
       return
     }
 
-    val serviceUuid = UUID.fromString("d74d5c87-3d2b-46b3-b8a8-d64ca4917301")
-    val errUuid = UUID.fromString("d74d5c87-3d2b-46b3-b8a8-d64ca491735f") // 735f (에러용)
-
-    val service = bluetoothGatt?.getService(serviceUuid)
-    val characteristic = service?.getCharacteristic(errUuid)
-
-    if (characteristic != null) {
-      val writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-
-      // 로그 추가: 내가 뭘 보내는지 확인
-      val hexString = dataBytes.joinToString(separator = " ") { "0x%02X".format(it) }
-      Log.d(tag, "[에러해제 전송] 타겟: 735f / 데이터: $hexString")
-
-      val success = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        bluetoothGatt?.writeCharacteristic(characteristic, dataBytes, writeType) == BluetoothStatusCodes.SUCCESS
-      } else {
-        characteristic.writeType = writeType
-        characteristic.value = dataBytes
-        @Suppress("DEPRECATION")
-        bluetoothGatt?.writeCharacteristic(characteristic) ?: false
-      }
-
-      if(success) Log.i(tag, "에러 해제 신호(0xAA) 전송 성공")
-      else Log.e(tag, "에러 해제 신호 전송 실패")
-
-    } else {
-      Log.e(tag, "에러 특성(735f)을 찾을 수 없음")
+    val characteristic = gatt.getService(NUS_SERVICE)?.getCharacteristic(NUS_RX)
+    if (characteristic == null) {
+      Log.e(tag, "RX 특성($NUS_RX)을 찾을 수 없음")
+      return
     }
+
+    val hexString = dataBytes.joinToString(separator = " ") { "0x%02X".format(it) }
+    Log.d(tag, "[RX 전송] $hexString")
+
+    val writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+    val success = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      gatt.writeCharacteristic(characteristic, dataBytes, writeType) == BluetoothStatusCodes.SUCCESS
+    } else {
+      characteristic.writeType = writeType
+      characteristic.value = dataBytes
+      @Suppress("DEPRECATION")
+      gatt.writeCharacteristic(characteristic)
+    }
+
+    if (success) Log.i(tag, "RX 전송 성공") else Log.e(tag, "RX 전송 실패")
   }
 
   private fun sendTimeSyncBinary() {
@@ -484,14 +506,14 @@ class BleService : Service() {
     val dataBytes = buffer.array()
 
     Log.d(tag, "시간 동기화(Binary 16bytes): sec=$sec, usec=$usec")
-    writeToModule(dataBytes) // 735e로 전송
+    writeToRx(dataBytes) // RX로 전송
   }
 
   @SuppressLint("MissingPermission")
   private fun enableNotification(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic) {
     if (gatt == null) return
     gatt.setCharacteristicNotification(characteristic, true)
-    val descriptor = characteristic.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
+    val descriptor = characteristic.getDescriptor(CCCD)
     if (descriptor != null) {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
@@ -540,34 +562,5 @@ class BleService : Service() {
       PendingIntent.FLAG_UPDATE_CURRENT
     }
     return PendingIntent.getActivity(this,0, intent, flags)
-  }
-
-  // CriticalActivity를 깨우는 비상 알림 함수
-  private fun showCriticalNotification(title: String, content: String) {
-    val manager = getSystemService(NotificationManager::class.java)
-
-    // 1. 목표 변경: MainActivity -> CriticalActivity
-    val fullScreenIntent = Intent(this, CriticalActivity::class.java)
-    // 중요: 새로운 태스크로 실행해야 기존 앱 위에 덮어씌워지지 않고 독립적으로 뜸
-    fullScreenIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-
-    val fullScreenPendingIntent = android.app.PendingIntent.getActivity(
-      this,
-      999,
-      fullScreenIntent,
-      android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-    )
-
-    // 2. 알림 설정 (헤드업 + 전체화면)
-    val builder = NotificationCompat.Builder(this, channelId)
-      .setSmallIcon(android.R.drawable.stat_sys_warning)
-      .setContentTitle(title)
-      .setContentText(content)
-      .setPriority(NotificationCompat.PRIORITY_HIGH)
-      .setCategory(NotificationCompat.CATEGORY_ALARM)
-      .setFullScreenIntent(fullScreenPendingIntent, true)
-      .setAutoCancel(true)
-
-    manager.notify(888, builder.build())
   }
 }
