@@ -1,0 +1,8 @@
+[project]
+name = "peob-prototype"
+version = "0.1.0"
+description = "페달 오조작 판정 로직 PC 프로토타입 (Chaquopy 이식 전 검증용)"
+requires-python = ">=3.10"
+# 의존성 없음 (stdlib만 사용) -> Chaquopy 전환 리스크 최소화.
+# 필요해지면 numpy 추가 (Chaquopy 공식 휠 존재).
+dependencies = []
