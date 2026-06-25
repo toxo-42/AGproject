@@ -1,0 +1,14 @@
+# 로컬 설정 (SDK 경로 등 — VCS에 올리면 안 됨)
+local.properties
+
+# Gradle / 빌드 산출물
+.gradle/
+build/
+app/build/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+
+# macOS
+.DS_Store

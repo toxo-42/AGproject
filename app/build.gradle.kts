@@ -1,6 +1,7 @@
 plugins {
   id("com.android.application")
   id("org.jetbrains.kotlin.android")
+  id("com.chaquo.python")
 }
 
 android {
@@ -15,6 +16,11 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // Chaquopy: 번들할 Python 네이티브 ABI. 실기기(arm64) + 에뮬레이터(x86_64)
+    ndk {
+      abiFilters += listOf("arm64-v8a", "x86_64")
+    }
   }
 
   buildTypes {
@@ -33,6 +39,13 @@ android {
   //viewBinding 기능 ON(code or butten을 쉽게 가져오기 위함)
   buildFeatures {
     viewBinding = true
+  }
+}
+
+// Chaquopy 설정: Python 코드는 기본 경로 src/main/python 에서 찾는다.
+chaquopy {
+  defaultConfig {
+    version = "3.12"
   }
 }
 
