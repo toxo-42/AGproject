@@ -43,6 +43,7 @@ class BleService : Service() {
   // 윈도잉 책임은 Kotlin 쪽(여기). Python은 판정만 한다.
   private val sampleBuffer = ArrayList<List<Double>>(WINDOW_SIZE)
   private var lastMisopShown = false   // 같은 오조작 연속 트리거 방지(예시)
+  private var lastCnt = -1             // 직전 샘플 cnt (누락 검출용, -1 = 아직 없음)
 
   companion object {
     // Nordic UART Service (NUS) 표준 UUID
@@ -56,11 +57,13 @@ class BleService : Service() {
     // CCCD: notify on/off 표준 디스크립터
     private val CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
-    // ── RAW 디코딩 포맷 (임시값, 펌웨어 확정 시 이 3개만 교체) ──────────
-    // 샘플 1개 = accel(uint16 LE) + brake(uint16 LE) = 4 bytes
-    private const val BYTES_PER_SAMPLE = 4
-    private const val ADC_MAX = 4095.0        // 12bit ADC 가정 (0~4095 -> 0.0~1.0)
-    private const val WINDOW_SIZE = 50        // 50Hz * 1초 = 50샘플마다 판정
+    // ── RAW 디코딩 포맷 (BLE_RAW_스트림_규격.md §3) ─────────────────
+    // 한 notify = 배치 프레임 1개: count(1B) + RawSample × N
+    // RawSample(10B, little-endian): int32 Q31 break, int32 Q31 accel, uint16 cnt
+    private const val BYTES_PER_SAMPLE = 10
+    private const val Q31_SCALE = 2147483648.0 // 2^31. raw / Q31_SCALE = 0.0~1.0 정규화 힘
+    // STM32 200Hz 원천 스트림 기준. 50샘플 = 0.25초 윈도우 (튜닝 대상)
+    private const val WINDOW_SIZE = 50
   }
 
   override fun onCreate() {
@@ -249,6 +252,18 @@ class BleService : Service() {
       saveStatus("정상 연결")
       sendBroadcastToActivity("ACTION_UUID_MATCHED")
 
+      // 규격 §6: notify 구독 '전에' MTU를 키워야 한다.
+      // 미요청 시 MTU=23 -> payload 20B -> 41B 배치 프레임이 아예 안 들어옴(데이터 0의 1순위 원인).
+      // MTU 협상 결과는 onMtuChanged 로 이어지고, 거기서 구독을 시작한다.
+      gatt.requestMtu(247) // 펌웨어 preferred 와 동일. 실제값은 양측 min 으로 협상됨
+    }
+
+    // MTU 협상 완료 -> 연결 주기 단축 후 notify 구독 시작
+    @SuppressLint("MissingPermission")
+    override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
+      Log.i(tag, "MTU 협상 완료: $mtu (status=$status)")
+      // 규격 §6: 50Hz 배치를 빠짐없이 받으려면 connection interval <= 20ms 필요
+      gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
       subscribeNext(gatt) // 첫 구독 시작 -> 이후 onDescriptorWrite 콜백으로 이어짐
     }
 
@@ -271,8 +286,8 @@ class BleService : Service() {
   private fun subscribeNext(gatt: BluetoothGatt?) {
     val next = notifyQueue.removeFirstOrNull()
     if (next == null) {
-      Log.i(tag, "모든 notify 구독 완료 -> 시간 동기화 전송")
-      sendTimeSyncBinary()
+      // 규격 §5: 시간 동기화(과거 16B sec/usec)는 제거됨. 절대시각은 폰 수신시각 + cnt 로 처리.
+      Log.i(tag, "모든 notify 구독 완료 -> 데이터 수신 대기")
       return
     }
     Log.i(tag, "notify 구독 시작: ${next.uuid}")
@@ -307,21 +322,45 @@ class BleService : Service() {
   }
 
   // ── 기기 -> 폰 raw 바이너리 처리 (엑셀/페달 오조작 로컬 판단 입력부) ──────────
-  // 기기가 간헐적으로 보내는 ~50Hz 센서 데이터가 여기로 들어온다.
-  // TODO: 1) 바이트 -> 샘플 디코딩  2) 윈도우 버퍼링  3) 로컬 판단(파이썬 모델 결과 회수)
-  //       4) 오조작 판정 시 경고 트리거.  (기존 MCU 측 PEDAL_ERR 문자열 감지 대체)
+  // 50Hz 로 들어오는 배치 프레임(count + RawSample×N)을 디코딩해 윈도우에 쌓고,
+  // 윈도우가 차면 Python judge_json 으로 판정한다. (BLE_RAW_스트림_규격.md §3)
   private fun handleRawData(data: ByteArray) {
-    Log.d(tag, "수신(RAW): ${data.size} bytes")
+    if (data.isEmpty()) {
+      Log.w(tag, "수신(RAW): 빈 프레임 폐기")
+      return
+    }
 
-    // 1) 바이트 -> [accel, brake] 샘플 디코딩 (4바이트씩 끊어 읽기)
     val buf = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
-    while (buf.remaining() >= BYTES_PER_SAMPLE) {
-      val accel = (buf.short.toInt() and 0xFFFF) / ADC_MAX
-      val brake = (buf.short.toInt() and 0xFFFF) / ADC_MAX
+
+    // 프레임 = count(1B) + RawSample × count. 길이 검증으로 깨진 프레임 폐기.
+    val count = buf.get().toInt() and 0xFF
+    val expected = 1 + count * BYTES_PER_SAMPLE
+    if (data.size != expected) {
+      Log.w(tag, "수신(RAW): 길이 불일치 ${data.size}B (기대 ${expected}B, count=$count) -> 폐기")
+      return
+    }
+    Log.d(tag, "수신(RAW): count=$count (${data.size}B)")
+
+    repeat(count) {
+      val brkRaw = buf.int                    // int32 Q31 (offset 0: break)
+      val accRaw = buf.int                    // int32 Q31 (offset 4: accel)
+      val cnt = buf.short.toInt() and 0xFFFF  // uint16 시퀀스 (offset 8)
+
+      // cnt 누락 검출: 200Hz 등간격이라 직전과의 차가 1보다 크면 그만큼 빠진 것.
+      // wrap-around(65536) 고려해 (현재 - 직전) and 0xFFFF 로 계산.
+      if (lastCnt >= 0) {
+        val gap = (cnt - lastCnt) and 0xFFFF
+        if (gap > 1) Log.w(tag, "샘플 누락 의심: cnt $lastCnt -> $cnt (gap=$gap)")
+      }
+      lastCnt = cnt
+
+      // Q31 raw -> 0.0~1.0 정규화 힘. judge.py 는 [accel, brake] 순서를 기대하므로 주의.
+      val brake = brkRaw / Q31_SCALE
+      val accel = accRaw / Q31_SCALE
       sampleBuffer.add(listOf(accel, brake))
     }
 
-    // 2) 윈도우가 차면 Python judge 호출 후 버퍼 비움
+    // 윈도우가 차면 Python judge 호출 후 버퍼 비움
     if (sampleBuffer.size >= WINDOW_SIZE) {
       val window = ArrayList(sampleBuffer)   // 복사본 전달
       sampleBuffer.clear()
@@ -490,23 +529,6 @@ class BleService : Service() {
     }
 
     if (success) Log.i(tag, "RX 전송 성공") else Log.e(tag, "RX 전송 실패")
-  }
-
-  private fun sendTimeSyncBinary() {
-    val currentTimeMillis = System.currentTimeMillis()
-    val sec: Long = currentTimeMillis / 1000
-    val usec: Long = (currentTimeMillis % 1000) * 1000
-
-    val buffer = ByteBuffer.allocate(16)
-    buffer.order(ByteOrder.LITTLE_ENDIAN)
-
-    buffer.putLong(sec)
-    buffer.putLong(usec)
-
-    val dataBytes = buffer.array()
-
-    Log.d(tag, "시간 동기화(Binary 16bytes): sec=$sec, usec=$usec")
-    writeToRx(dataBytes) // RX로 전송
   }
 
   @SuppressLint("MissingPermission")
