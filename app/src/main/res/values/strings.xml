@@ -30,4 +30,18 @@
 
   <string name="desc_back_button">뒤로 가기</string>
   <string name="desc_device_icon">기기 아이콘</string>
+
+  <!-- 데이터 수집(Phase A): 운전 습관 프로필 + 오조작 구간 라벨링 -->
+  <string name="title_data_collect">데이터 수집</string>
+  <string name="btn_data_collect">데이터 수집 (Collect)</string>
+  <string name="label_profile">운전 습관 프로필</string>
+  <string name="profile_strong">강함</string>
+  <string name="profile_normal">보통</string>
+  <string name="profile_weak">약함</string>
+  <string name="btn_label_misop">오조작 구간 기록</string>
+  <string name="btn_label_misop_on">● 오조작 기록 중</string>
+  <string name="label_indicator_off">○ 정상</string>
+  <string name="label_indicator_on">● 오조작 기록 중</string>
+  <string name="live_values_idle">accel  —      brake  —</string>
+  <string name="graph_legend">— accel   — brake   ─ 붉은 실선: 엑셀 임계값   ┄ 붉은 점선: 브레이크 임계값</string>
 </resources>

@@ -23,6 +23,7 @@ class DeviceManagerActivity : AppCompatActivity() {
   private lateinit var etMacAddress: EditText
   private lateinit var tvConnectionStatus: TextView
   private lateinit var btnDisconnect: MaterialButton
+  private lateinit var btnDataCollect: MaterialButton
 
   // TTS 변수 선언
   private var tts: TextToSpeech? = null
@@ -37,6 +38,12 @@ class DeviceManagerActivity : AppCompatActivity() {
     etMacAddress = findViewById(R.id.etMacAddress)
     tvConnectionStatus = findViewById(R.id.tvConnectionStatus)
     btnDisconnect = findViewById(R.id.btnDisconnect)
+    btnDataCollect = findViewById(R.id.btnDataCollect)
+
+    // 데이터 수집 화면 진입 (실시간 그래프 + 프로필/라벨링)
+    btnDataCollect.setOnClickListener {
+      startActivity(Intent(this, DataCollectActivity::class.java))
+    }
 
     // 3. 설정 버튼 연결
     val btnOpenSettings = findViewById<ImageButton>(R.id.btnOpenSettings)

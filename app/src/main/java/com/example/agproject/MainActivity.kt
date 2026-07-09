@@ -18,8 +18,6 @@ import android.content.Context
 import androidx.core.content.ContextCompat
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
-import com.chaquo.python.Python
-import com.chaquo.python.android.AndroidPlatform
 import jp.wasabeef.glide.transformations.BlurTransformation
 
 
@@ -31,7 +29,6 @@ class MainActivity : AppCompatActivity() {
   private lateinit var tvTargetAddress: TextView
   private lateinit var btnGoScan: MaterialButton
   private lateinit var btnGoManager: MaterialButton
-  private lateinit var btnSelfTest: MaterialButton
 
 
   private var isRunning = false
@@ -81,7 +78,6 @@ class MainActivity : AppCompatActivity() {
     tvTargetAddress = findViewById(R.id.tvTargetAddress)
     btnGoScan = findViewById(R.id.btnGoScan)
     btnGoManager = findViewById(R.id.btnGoManager)
-    btnSelfTest = findViewById(R.id.btnSelfTest)
 
     // 앱 켜자마자 권한 확인
     checkPermissions()
@@ -107,38 +103,6 @@ class MainActivity : AppCompatActivity() {
       toggleSystem()
     }
 
-    // 디버그: Python(judge.py) 연동 자가진단. BLE 기기 없이도 동작.
-    btnSelfTest.setOnClickListener {
-      runSelfTest()
-    }
-  }
-
-  // judge.py 가 안드로이드 안에서 실제로 호출되는지 확인하는 자가진단.
-  // 더미 윈도우 하나를 만들어 judge_json 을 호출하고 결과를 Logcat 에 찍는다.
-  // BleService 와 무관하게, 이 버튼만 누르면 즉시 실행된다.
-  private fun runSelfTest() {
-    val logTag = "MainActivity"
-    try {
-      // Python 런타임은 앱 생명주기 동안 한 번만 시작
-      if (!Python.isStarted()) {
-        Python.start(AndroidPlatform(this))
-      }
-      // 전형적 오조작 패턴(accel=0.95, brake=0.0) 50샘플 -> JSON 문자열로 직렬화
-      // (Chaquopy가 ArrayList를 Python list로 변환 못 해서 문자열로 넘긴다)
-      val samples = org.json.JSONArray()
-      repeat(50) { samples.put(org.json.JSONArray(listOf(0.95, 0.0))) }
-
-      val resultJson = Python.getInstance()
-        .getModule("judge")
-        .callAttr("judge_json", samples.toString())
-        .toString()
-
-      Log.i(logTag, "[Chaquopy 자가진단] judge_json -> $resultJson")
-      Toast.makeText(this, "자가진단 OK: $resultJson", Toast.LENGTH_LONG).show()
-    } catch (e: Exception) {
-      Log.e(logTag, "[Chaquopy 자가진단] 실패: ${e.message}", e)
-      Toast.makeText(this, "자가진단 실패: ${e.message}", Toast.LENGTH_LONG).show()
-    }
   }
 
   override fun onResume() {

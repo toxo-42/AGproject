@@ -50,6 +50,15 @@ def get_thresholds(profile: str) -> dict[str, float]:
     return PROFILES.get(profile, PROFILES[DEFAULT_PROFILE])
 
 
+def thresholds_json(profile: str = DEFAULT_PROFILE) -> str:
+    """Chaquopy 경계용: 프로필의 임계값 세트를 JSON 문자열로 반환.
+
+    데이터 수집 화면이 그래프에 임계선을 그릴 때 쓴다. Kotlin 이 임계값을
+    따로 하드코딩하지 않게 해서 PROFILES 를 단일 소스로 유지한다.
+    """
+    return json.dumps(get_thresholds(profile))
+
+
 def judge(samples: list[list[float]], profile: str = DEFAULT_PROFILE) -> dict:
     """윈도우 하나를 받아 오조작 여부를 판정.
 

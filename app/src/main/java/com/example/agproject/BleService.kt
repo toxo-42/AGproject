@@ -56,6 +56,29 @@ class BleService : Service() {
   private var csvWriter: java.io.BufferedWriter? = null
   private var csvClosed = false
 
+  // ── 라벨링 (Phase A: 지도학습용 정답 수집) ────────────────────────
+  // MainActivity 의 '오조작' 토글이 ACTION_SET_LABEL 로 갱신한다.
+  // BLE 콜백 스레드가 읽고 UI 스레드가 쓰므로 @Volatile 필요.
+  @Volatile private var currentLabel = LABEL_NORMAL
+
+  // 수집 화면이 떠 있는 동안만 true. BLE 콜백 스레드가 읽고 메인 스레드가 쓴다.
+  @Volatile private var liveStreamEnabled = false
+
+  // ── 로그 스로틀링 ────────────────────────────────────────────────
+  // 배치 50Hz / 판정 4Hz 로 로그를 찍으면 logcat 링버퍼가 몇 분 만에 밀려 나가
+  // 정작 필요한 연결·오류 로그가 사라진다. 요약과 상태 변화만 남긴다.
+  private var rawBatchCount = 0
+  private var rawSampleCount = 0
+  private var lastRawLogMs = 0L
+  private var lastJudgeLogMs = 0L
+  private var lastLoggedMisop: Boolean? = null
+  private var lastTextMessage: String? = null
+
+  // 이번 세션의 운전 습관 프로필. 파일명에 남기고, judge_json 에도 그대로 넘긴다.
+  // 세션 도중 바뀌면 CSV 와 판정 기준이 어긋나므로 서비스 시작 시점에 한 번만 읽는다.
+  // onStartCommand(메인 스레드)가 쓰고 BLE 콜백 스레드가 읽는다.
+  @Volatile private var sessionProfile = DEFAULT_PROFILE
+
   companion object {
     // Nordic UART Service (NUS) 표준 UUID
     private val NUS_SERVICE = UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
@@ -75,6 +98,32 @@ class BleService : Service() {
     private const val Q31_SCALE = 2147483648.0 // 2^31. raw / Q31_SCALE = 0.0~1.0 정규화 힘
     // STM32 200Hz 원천 스트림 기준. 50샘플 = 0.25초 윈도우 (튜닝 대상)
     private const val WINDOW_SIZE = 50
+
+    // 로그 스로틀 주기 (수신 요약 / 판정 하트비트)
+    private const val RAW_LOG_INTERVAL_MS = 5_000L
+    private const val JUDGE_LOG_INTERVAL_MS = 10_000L
+
+    // ── 라벨링/프로필 (Phase A) ─────────────────────────────────────
+    // MainActivity 가 오조작 토글을 누를 때 보내는 인텐트.
+    const val ACTION_SET_LABEL = "ACTION_SET_LABEL"
+    const val EXTRA_LABEL = "LABEL"
+
+    const val LABEL_NORMAL = 0   // 정상 주행 구간
+    const val LABEL_MISOP = 1    // 오조작 재현 구간
+
+    // 프로필은 SharedPreferences("AgPrefs") 에 저장된다. judge.py 의 PROFILES 키와 반드시 일치.
+    const val PREF_PROFILE = "DRIVER_PROFILE"
+    const val DEFAULT_PROFILE = "normal"
+    val VALID_PROFILES = setOf("strong", "normal", "weak")
+
+    // ── 실시간 그래프 스트림 (DataCollectActivity 전용) ──────────────
+    // 50Hz 브로드캐스트라 평소엔 낭비다. 수집 화면이 떠 있는 동안만 켠다.
+    const val ACTION_SET_LIVE_STREAM = "ACTION_SET_LIVE_STREAM"
+    const val EXTRA_LIVE_STREAM = "LIVE_STREAM"
+
+    const val ACTION_LIVE_SAMPLES = "ACTION_LIVE_SAMPLES"
+    const val EXTRA_ACCELS = "ACCELS"   // FloatArray, 배치 내 샘플 순서
+    const val EXTRA_BRAKES = "BRAKES"   // FloatArray, 같은 길이
   }
 
   override fun onCreate() {
@@ -87,24 +136,6 @@ class BleService : Service() {
     // Chaquopy Python 런타임 시작 (앱 생명주기 동안 한 번만)
     if (!Python.isStarted()) {
       Python.start(AndroidPlatform(this))
-    }
-    selfTestJudge() // 연동 관통 확인용 (실데이터 없을 때)
-  }
-
-  // judge.py 가 안드로이드 안에서 실제로 호출되는지 확인하는 자가진단.
-  // 더미 윈도우 하나를 만들어 호출하고 결과 JSON 을 Logcat 에 찍는다.
-  // RAW 디코딩/실데이터 연동이 끝나면 제거해도 된다.
-  private fun selfTestJudge() {
-    try {
-      val dummy = org.json.JSONArray()
-      repeat(WINDOW_SIZE) { dummy.put(org.json.JSONArray(listOf(0.95, 0.0))) } // 전형적 오조작 패턴
-      val resultJson = Python.getInstance()
-        .getModule("judge")
-        .callAttr("judge_json", dummy.toString())
-        .toString()
-      Log.i(tag, "[Chaquopy 자가진단] judge_json -> $resultJson")
-    } catch (e: Exception) {
-      Log.e(tag, "[Chaquopy 자가진단] 실패: ${e.message}", e)
     }
   }
 
@@ -124,6 +155,24 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
+    // 오조작 라벨 토글. 이후 기록되는 CSV 행의 label 컬럼이 이 값으로 찍힌다.
+    if (intent?.action == ACTION_SET_LABEL) {
+      currentLabel = if (intent.getIntExtra(EXTRA_LABEL, LABEL_NORMAL) == LABEL_MISOP) {
+        LABEL_MISOP
+      } else {
+        LABEL_NORMAL
+      }
+      Log.i(tag, "라벨 변경: label=$currentLabel (${if (currentLabel == LABEL_MISOP) "오조작" else "정상"})")
+      return START_NOT_STICKY
+    }
+
+    // 실시간 그래프 스트림 on/off (수집 화면 진입/이탈)
+    if (intent?.action == ACTION_SET_LIVE_STREAM) {
+      liveStreamEnabled = intent.getBooleanExtra(EXTRA_LIVE_STREAM, false)
+      Log.i(tag, "실시간 스트림: $liveStreamEnabled")
+      return START_NOT_STICKY
+    }
+
     val newAddress = intent?.getStringExtra("TARGET_ADDRESS")
     if (newAddress != null) {
       targetAddress = newAddress
@@ -134,6 +183,10 @@ class BleService : Service() {
       stopSelf()
       return START_NOT_STICKY
     }
+
+    // 이번 세션에 적용할 프로필 확정. 이후 CSV 파일명·judge_json 판정에 모두 쓰인다.
+    sessionProfile = readProfile()
+    Log.i(tag, "세션 프로필: $sessionProfile")
 
     startForegroundServiceNotification("타겟 감시 중: $targetAddress")
     startTargetScan()
@@ -311,7 +364,12 @@ class BleService : Service() {
   // TODO: 에러 구조 전면 개편 예정. 지금은 패턴 예시 하나(MODULE_ERR)만 구현.
   //       새 구조 확정되면 아래 when 분기에 케이스만 추가하면 됨.
   private fun handleTextMessage(msg: String) {
-    Log.d(tag, "수신(TX): $msg")
+    // 펌웨어가 MODULE_ERR 을 연속 송신할 수 있어(FSR 연결 불안정 감지 로직) 같은 메시지
+    // 반복은 로그를 남기지 않는다. 메시지가 바뀌는 순간만 기록.
+    if (msg != lastTextMessage) {
+      Log.d(tag, "수신(TX): $msg")
+      lastTextMessage = msg
+    }
     when {
       msg.contains("MODULE_ERR") -> onModuleError()
       // TODO: SD_SMALL 등 새 에러 구조에 맞춰 케이스 추가
@@ -322,8 +380,7 @@ class BleService : Service() {
   // [예시] 모듈 오류 처리: 중복 수신은 사용자 확인 전까지 무시
   private fun onModuleError() {
     if (isErrorDialogShowing) {
-      Log.d(tag, "에러 중복 수신 무시 (사용자 확인 대기 중)")
-      return
+      return   // 중복 수신 — 로그도 남기지 않는다(초당 수십 회 들어옴)
     }
     isErrorDialogShowing = true
 
@@ -343,11 +400,12 @@ class BleService : Service() {
     return try {
       val dir = java.io.File(filesDir, "logs").apply { if (!exists()) mkdirs() }
       val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-      val file = java.io.File(dir, "pedal_$ts.csv")
+      // 파일명에 프로필을 박아 두면 나중에 adb pull 만으로 어느 프로필 세션인지 알 수 있다.
+      val file = java.io.File(dir, "pedal_${ts}_$sessionProfile.csv")
       java.io.BufferedWriter(java.io.FileWriter(file, true)).also {
-        it.write("recv_epoch_ms,cnt,accel,brake\n")
+        it.write("recv_epoch_ms,cnt,accel,brake,label\n")
         csvWriter = it
-        Log.i(tag, "RAW 로깅 시작: ${file.absolutePath}")
+        Log.i(tag, "RAW 로깅 시작: ${file.absolutePath} (프로필=$sessionProfile)")
       }
     } catch (e: Exception) {
       Log.e(tag, "CSV 로깅 파일 생성 실패: ${e.message}", e)
@@ -355,12 +413,22 @@ class BleService : Service() {
     }
   }
 
-  private fun writeRawCsv(recvMs: Long, cnt: Int, accel: Double, brake: Double) {
+  // 저장된 프로필을 읽되, 값이 깨졌거나 없으면 기본 프로필로 떨어진다.
+  // (judge.py 도 모르는 프로필명은 normal 로 fallback 하므로 양쪽이 일관)
+  private fun readProfile(): String {
+    val saved = getSharedPreferences("AgPrefs", MODE_PRIVATE).getString(PREF_PROFILE, null)
+    return if (saved in VALID_PROFILES) saved!! else DEFAULT_PROFILE
+  }
+
+  private fun writeRawCsv(recvMs: Long, cnt: Int, accel: Double, brake: Double, label: Int) {
     synchronized(csvLock) {
       val w = ensureCsvWriterLocked() ?: return
       try {
         // accel/brake 는 소수 4자리로 반올림(Q31 원본보다 촘촘할 필요 없음 → 줄 크기 안정).
-        w.write("$recvMs,$cnt,${String.format(Locale.US, "%.4f", accel)},${String.format(Locale.US, "%.4f", brake)}\n")
+        w.write(
+          "$recvMs,$cnt,${String.format(Locale.US, "%.4f", accel)}," +
+            "${String.format(Locale.US, "%.4f", brake)},$label\n"
+        )
       } catch (e: Exception) {
         Log.e(tag, "CSV 쓰기 실패: ${e.message}")
       }
@@ -404,12 +472,34 @@ class BleService : Service() {
       Log.w(tag, "수신(RAW): 길이 불일치 ${data.size}B (기대 ${expected}B, count=$count) -> 폐기")
       return
     }
-    Log.d(tag, "수신(RAW): count=$count (${data.size}B)")
+    // 배치마다 로그를 찍으면 50줄/초라 logcat 링버퍼가 몇 분 만에 밀려 나간다.
+    // 수신이 살아 있다는 것만 확인하면 되므로 주기적으로 요약만 남긴다.
+    rawBatchCount++
+    rawSampleCount += count
+    val nowMs = System.currentTimeMillis()
+    if (lastRawLogMs == 0L) {
+      lastRawLogMs = nowMs   // 첫 배치: 기준 시각만 잡고 요약은 다음 주기부터
+    } else if (nowMs - lastRawLogMs >= RAW_LOG_INTERVAL_MS) {
+      val elapsed = (nowMs - lastRawLogMs) / 1000.0
+      val hz = rawSampleCount / elapsed
+      Log.i(tag, "수신(RAW) 요약: ${rawBatchCount}배치 / ${rawSampleCount}샘플 (${"%.1f".format(hz)}Hz)")
+      lastRawLogMs = nowMs
+      rawBatchCount = 0
+      rawSampleCount = 0
+    }
 
     // 이 배치를 수신한 폰 로컬 시각(같은 배치 내 샘플은 cnt 로 순서 구분).
-    val recvMs = System.currentTimeMillis()
+    val recvMs = nowMs
+    // 라벨은 배치 시작 시점에 한 번만 읽는다. 배치 처리 도중 토글이 바뀌어도
+    // 같은 배치(20ms) 안의 샘플들은 같은 라벨을 갖는 편이 해석하기 쉽다.
+    val label = currentLabel
 
-    repeat(count) {
+    // 실시간 그래프용 배치 버퍼 (스트림이 꺼져 있으면 만들지 않는다)
+    val streaming = liveStreamEnabled
+    val liveAccels = if (streaming) FloatArray(count) else null
+    val liveBrakes = if (streaming) FloatArray(count) else null
+
+    repeat(count) { i ->
       val brkRaw = buf.int                    // int32 Q31 (offset 0: break)
       val accRaw = buf.int                    // int32 Q31 (offset 4: accel)
       val cnt = buf.short.toInt() and 0xFFFF  // uint16 시퀀스 (offset 8)
@@ -426,9 +516,20 @@ class BleService : Service() {
       val brake = brkRaw / Q31_SCALE
       val accel = accRaw / Q31_SCALE
       sampleBuffer.add(listOf(accel, brake))
-      writeRawCsv(recvMs, cnt, accel, brake)   // 원시 샘플 그대로 CSV 축적 (Phase A)
+      writeRawCsv(recvMs, cnt, accel, brake, label)   // 원시 샘플 + 라벨 CSV 축적 (Phase A)
+
+      liveAccels?.set(i, accel.toFloat())
+      liveBrakes?.set(i, brake.toFloat())
     }
     flushRawCsv()   // 배치 단위로 flush (앱 강제종료 시 손실 최소화)
+
+    if (liveAccels != null && liveBrakes != null) {
+      sendBroadcast(Intent(ACTION_LIVE_SAMPLES).apply {
+        setPackage(packageName)
+        putExtra(EXTRA_ACCELS, liveAccels)
+        putExtra(EXTRA_BRAKES, liveBrakes)
+      })
+    }
 
     // 윈도우가 차면 Python judge 호출 후 버퍼 비움
     if (sampleBuffer.size >= WINDOW_SIZE) {
@@ -444,14 +545,26 @@ class BleService : Service() {
       // 윈도우를 JSON 문자열로 직렬화해 전달 (Chaquopy ArrayList 변환 이슈 회피)
       val samplesJson = org.json.JSONArray()
       for (sample in window) samplesJson.put(org.json.JSONArray(sample))
+      // 프로필을 함께 넘겨 사용자별 임계값으로 판정한다 (judge.py PROFILES).
       val resultJson = Python.getInstance()
         .getModule("judge")
-        .callAttr("judge_json", samplesJson.toString())
+        .callAttr("judge_json", samplesJson.toString(), sessionProfile)
         .toString()
       val result = JSONObject(resultJson)
       val misop = result.getBoolean("misop")
       val score = result.getDouble("score")
-      Log.d(tag, "판정: misop=$misop score=$score")
+
+      // 판정은 4Hz 로 나온다. 상태가 바뀌는 순간(정상<->오조작)은 항상 남기고,
+      // 변화가 없으면 살아있다는 표시로 주기적 하트비트만 남긴다.
+      val nowMs = System.currentTimeMillis()
+      if (misop != lastLoggedMisop) {
+        Log.i(tag, "판정 변화: misop=$misop score=$score profile=$sessionProfile")
+        lastLoggedMisop = misop
+        lastJudgeLogMs = nowMs
+      } else if (nowMs - lastJudgeLogMs >= JUDGE_LOG_INTERVAL_MS) {
+        Log.d(tag, "판정: misop=$misop score=$score profile=$sessionProfile")
+        lastJudgeLogMs = nowMs
+      }
 
       if (misop && !lastMisopShown) {
         lastMisopShown = true

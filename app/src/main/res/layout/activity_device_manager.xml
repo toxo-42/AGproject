@@ -117,6 +117,23 @@
 
   </LinearLayout>
 
+  <!-- 데이터 수집 화면 진입 (Phase A: 실시간 그래프 + 라벨링) -->
+  <com.google.android.material.button.MaterialButton
+      android:id="@+id/btnDataCollect"
+      android:layout_width="match_parent"
+      android:layout_height="60dp"
+      android:text="@string/btn_data_collect"
+      android:backgroundTint="@color/bg_dark"
+      android:textColor="@color/accent_blue"
+      app:strokeColor="@color/accent_blue"
+      app:strokeWidth="2dp"
+      app:cornerRadius="12dp"
+      android:layout_marginHorizontal="16dp"
+      android:layout_marginBottom="16dp"
+      app:layout_constraintBottom_toTopOf="@id/btnDisconnect"
+      app:layout_constraintStart_toStartOf="parent"
+      app:layout_constraintEnd_toEndOf="parent"/>
+
   <com.google.android.material.button.MaterialButton
       android:id="@+id/btnDisconnect"
       android:layout_width="match_parent"
@@ -127,7 +144,10 @@
       app:strokeColor="@color/red_error"
       app:strokeWidth="2dp"
       app:cornerRadius="12dp"
-      app:layout_constraintBottom_toBottomOf="parent" tools:layout_editor_absoluteX="16dp"
+      android:layout_marginHorizontal="16dp"
+      app:layout_constraintBottom_toBottomOf="parent"
+      app:layout_constraintStart_toStartOf="parent"
+      app:layout_constraintEnd_toEndOf="parent"
       android:layout_marginBottom="70dp"/>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

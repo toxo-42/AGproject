@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_dark"
+    android:padding="20dp">
+
+    <TextView
+        android:id="@+id/tvCollectTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/title_data_collect"
+        android:textColor="@color/accent_blue"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <!-- 라벨링 표시등: label=1 인 동안 붉게 켜진다 -->
+    <TextView
+        android:id="@+id/tvLabelIndicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/label_indicator_off"
+        android:textColor="@color/text_hint"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        app:layout_constraintTop_toTopOf="@id/tvCollectTitle"
+        app:layout_constraintBottom_toBottomOf="@id/tvCollectTitle"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- 현재 압력값 (숫자) -->
+    <TextView
+        android:id="@+id/tvLiveValues"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/live_values_idle"
+        android:textColor="@color/text_gray"
+        android:textSize="15sp"
+        android:fontFamily="monospace"
+        app:layout_constraintTop_toBottomOf="@id/tvCollectTitle"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <!-- 실시간 그래프 (accel/brake + 임계선) -->
+    <com.example.agproject.PedalGraphView
+        android:id="@+id/graphPedal"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="12dp"
+        android:background="@color/bg_card"
+        app:layout_constraintTop_toBottomOf="@id/tvLiveValues"
+        app:layout_constraintBottom_toTopOf="@id/tvLegend" />
+
+    <TextView
+        android:id="@+id/tvLegend"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:text="@string/graph_legend"
+        android:textColor="@color/text_hint"
+        android:textSize="12sp"
+        app:layout_constraintBottom_toTopOf="@id/tvProfileLabel" />
+
+    <TextView
+        android:id="@+id/tvProfileLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:text="@string/label_profile"
+        android:textColor="@color/text_gray"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        app:layout_constraintBottom_toTopOf="@id/toggleProfile"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/toggleProfile"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="14dp"
+        app:singleSelection="true"
+        app:selectionRequired="true"
+        app:layout_constraintBottom_toTopOf="@id/btnLabelMisop"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnProfileStrong"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:text="@string/profile_strong"
+            android:textColor="@color/text_white"
+            android:textSize="13sp"
+            app:strokeColor="@color/accent_blue" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnProfileNormal"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:text="@string/profile_normal"
+            android:textColor="@color/text_white"
+            android:textSize="13sp"
+            app:strokeColor="@color/accent_blue" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnProfileWeak"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:text="@string/profile_weak"
+            android:textColor="@color/text_white"
+            android:textSize="13sp"
+            app:strokeColor="@color/accent_blue" />
+
+    </com.google.android.material.button.MaterialButtonToggleGroup>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnLabelMisop"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="@string/btn_label_misop"
+        android:textColor="@color/text_gray"
+        android:textSize="15sp"
+        app:strokeColor="@color/text_hint"
+        app:cornerRadius="12dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

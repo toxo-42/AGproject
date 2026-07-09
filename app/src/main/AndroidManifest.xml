@@ -47,6 +47,7 @@
         <activity android:name=".ScanActivity" />
 
         <activity android:name=".DeviceManagerActivity" />
+        <activity android:name=".DataCollectActivity" />
 
         <service
             android:name=".BleService"
