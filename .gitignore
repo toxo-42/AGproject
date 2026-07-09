@@ -12,3 +12,8 @@ app/build/
 
 # macOS
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+prototype/.venv/
