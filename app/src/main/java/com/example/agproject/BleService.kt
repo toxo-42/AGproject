@@ -45,6 +45,17 @@ class BleService : Service() {
   private var lastMisopShown = false   // 같은 오조작 연속 트리거 방지(예시)
   private var lastCnt = -1             // 직전 샘플 cnt (누락 검출용, -1 = 아직 없음)
 
+  // ── RAW 원시 샘플 CSV 로깅 (Phase A: 학습 데이터 수집) ──────────────
+  // 첫 RAW 샘플이 실제로 도착한 시점에 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
+  // 저장 위치: filesDir/logs/pedal_yyyyMMdd_HHmmss.csv (권한 불필요, adb pull 로 회수)
+  // 컬럼: recv_epoch_ms,cnt,accel,brake  (원시 샘플 1개당 1줄, 판정 윈도우와 무관하게 전부 기록)
+  //
+  // BLE notify 콜백은 여러 바인더 스레드에서 올라온다 → BufferedWriter 접근은 전부 csvLock 아래에서.
+  // csvClosed 는 종료 후 뒤늦게 도착한 콜백이 새 세션 파일을 되살리는 것을 막는다.
+  private val csvLock = Any()
+  private var csvWriter: java.io.BufferedWriter? = null
+  private var csvClosed = false
+
   companion object {
     // Nordic UART Service (NUS) 표준 UUID
     private val NUS_SERVICE = UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
@@ -161,7 +172,9 @@ class BleService : Service() {
   }
 
   override fun onDestroy() {
+    // 순서 중요: GATT 를 먼저 끊어야 뒤늦은 notify 콜백이 세션 파일을 되살리지 않는다.
     disconnectGatt()
+    closeCsvWriter()   // 세션 로그 파일 flush + close
     super.onDestroy()
   }
 
@@ -321,6 +334,58 @@ class BleService : Service() {
     sendBroadcastToActivity("ACTION_MODULE_ERROR")
   }
 
+  // ── RAW 원시 샘플 CSV 로깅 헬퍼 (Phase A) ──────────────────────────
+  // 모두 csvLock 아래에서 호출된다고 가정한다(호출부: writeRawCsv/flushRawCsv/closeCsvWriter).
+  // 최초 호출 시점에 세션 파일을 lazy 로 연다. 실패해도 판정 흐름은 계속되도록 예외를 삼킨다.
+  private fun ensureCsvWriterLocked(): java.io.BufferedWriter? {
+    if (csvClosed) return null   // 서비스 종료 후 도착한 콜백 → 새 세션 파일을 열지 않는다
+    csvWriter?.let { return it }
+    return try {
+      val dir = java.io.File(filesDir, "logs").apply { if (!exists()) mkdirs() }
+      val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+      val file = java.io.File(dir, "pedal_$ts.csv")
+      java.io.BufferedWriter(java.io.FileWriter(file, true)).also {
+        it.write("recv_epoch_ms,cnt,accel,brake\n")
+        csvWriter = it
+        Log.i(tag, "RAW 로깅 시작: ${file.absolutePath}")
+      }
+    } catch (e: Exception) {
+      Log.e(tag, "CSV 로깅 파일 생성 실패: ${e.message}", e)
+      null
+    }
+  }
+
+  private fun writeRawCsv(recvMs: Long, cnt: Int, accel: Double, brake: Double) {
+    synchronized(csvLock) {
+      val w = ensureCsvWriterLocked() ?: return
+      try {
+        // accel/brake 는 소수 4자리로 반올림(Q31 원본보다 촘촘할 필요 없음 → 줄 크기 안정).
+        w.write("$recvMs,$cnt,${String.format(Locale.US, "%.4f", accel)},${String.format(Locale.US, "%.4f", brake)}\n")
+      } catch (e: Exception) {
+        Log.e(tag, "CSV 쓰기 실패: ${e.message}")
+      }
+    }
+  }
+
+  private fun flushRawCsv() {
+    synchronized(csvLock) {
+      try { csvWriter?.flush() } catch (e: Exception) { Log.w(tag, "CSV flush 실패: ${e.message}") }
+    }
+  }
+
+  private fun closeCsvWriter() {
+    synchronized(csvLock) {
+      try {
+        csvWriter?.flush()
+        csvWriter?.close()
+      } catch (e: Exception) {
+        Log.w(tag, "CSV 닫기 실패: ${e.message}")
+      }
+      csvWriter = null
+      csvClosed = true
+    }
+  }
+
   // ── 기기 -> 폰 raw 바이너리 처리 (엑셀/페달 오조작 로컬 판단 입력부) ──────────
   // 50Hz 로 들어오는 배치 프레임(count + RawSample×N)을 디코딩해 윈도우에 쌓고,
   // 윈도우가 차면 Python judge_json 으로 판정한다. (BLE_RAW_스트림_규격.md §3)
@@ -341,6 +406,9 @@ class BleService : Service() {
     }
     Log.d(tag, "수신(RAW): count=$count (${data.size}B)")
 
+    // 이 배치를 수신한 폰 로컬 시각(같은 배치 내 샘플은 cnt 로 순서 구분).
+    val recvMs = System.currentTimeMillis()
+
     repeat(count) {
       val brkRaw = buf.int                    // int32 Q31 (offset 0: break)
       val accRaw = buf.int                    // int32 Q31 (offset 4: accel)
@@ -358,7 +426,9 @@ class BleService : Service() {
       val brake = brkRaw / Q31_SCALE
       val accel = accRaw / Q31_SCALE
       sampleBuffer.add(listOf(accel, brake))
+      writeRawCsv(recvMs, cnt, accel, brake)   // 원시 샘플 그대로 CSV 축적 (Phase A)
     }
+    flushRawCsv()   // 배치 단위로 flush (앱 강제종료 시 손실 최소화)
 
     // 윈도우가 차면 Python judge 호출 후 버퍼 비움
     if (sampleBuffer.size >= WINDOW_SIZE) {
