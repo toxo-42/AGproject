@@ -5,9 +5,10 @@
 같은 주행 데이터를 프로필 3개로 각각 판정해, 프로필에 따라 경고가 실제로
 달라지는지 확인한다.
 
-⚠️ synth 는 SAMPLE_RATE_HZ=50 을 가정하지만 실기기는 200Hz 로 들어온다.
-   여기서의 '1초 윈도우'는 앱에선 0.25초 윈도우다(BleService.WINDOW_SIZE=50).
-   합성데이터로 튜닝한 high_ratio 를 앱에 그대로 옮기면 안 된다.
+synth(200Hz)와 BleService(WINDOW_SIZE=50 @ 200Hz)가 같은 샘플레이트를 쓰므로,
+아래 WINDOW_SIZE=50은 앱과 동일하게 0.25초짜리 윈도우다. STRIDE도 WINDOW_SIZE와
+같게 둬서 앱처럼 겹치지 않는(tumbling) 윈도우로 판정한다 — 여기서 튜닝한
+high_ratio를 그대로 앱에 옮겨도 되는 상태.
 """
 
 from __future__ import annotations
@@ -16,8 +17,8 @@ from judge import PROFILES, judge
 from synth import SAMPLE_RATE_HZ, misoperation, normal_drive
 from windowing import sliding_windows
 
-WINDOW_SIZE = SAMPLE_RATE_HZ      # 1초치 (50샘플)
-STRIDE = SAMPLE_RATE_HZ // 5      # 0.2초마다 판정 (10샘플)
+WINDOW_SIZE = SAMPLE_RATE_HZ // 4   # 0.25초치 (50샘플) — BleService.WINDOW_SIZE와 동일
+STRIDE = WINDOW_SIZE                # 겹치지 않는 윈도우 (앱의 tumbling 버퍼와 동일)
 
 
 def run_case(name: str, samples: list[list[float]], profile: str, *, verbose: bool) -> int:

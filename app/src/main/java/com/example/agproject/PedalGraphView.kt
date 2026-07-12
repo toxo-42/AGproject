@@ -113,13 +113,12 @@ class PedalGraphView @JvmOverloads constructor(
     val w = width.toFloat()
     val h = height.toFloat()
 
-    // 가로 격자 (0.25 간격)
-    var g = 0.0f
-    while (g <= 1.0f) {
+    // 가로 격자 (0.1 간격). 정수 반복으로 실수 누적 오차를 피한다.
+    for (i in 0..10) {
+      val g = i * 0.1f
       val y = toY(g, h)
       canvas.drawLine(0f, y, w, y, gridPaint)
       canvas.drawText(String.format("%.2f", g), 6f, y - 6f, labelPaint)
-      g += 0.25f
     }
 
     // 임계선 — 그래프 위에 얹혀야 하므로 파형보다 먼저 그린다.

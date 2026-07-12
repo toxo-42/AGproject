@@ -79,6 +79,18 @@ class BleService : Service() {
   // onStartCommand(메인 스레드)가 쓰고 BLE 콜백 스레드가 읽는다.
   @Volatile private var sessionProfile = DEFAULT_PROFILE
 
+  // ── 연속형 개인화 캘리브레이션 상태 ──────────────────────────────
+  // 계산된 임계값이 있으면(null 이 아니면) judgeWindow 가 profile 대신 이걸 쓴다.
+  // 이전 세션에 캘리브레이션한 값이 있으면 연결 시점에 prefs 에서 복원해 재사용한다
+  // (Phase C: "매번 재분류 X").
+  @Volatile private var calibratedThresholdsJson: String? = null
+
+  // 캘리브레이션 수집 중에만 true. BLE 콜백 스레드가 쓰고 읽는다(단일 스레드 흐름이라 lock 불필요 —
+  // sampleBuffer 와 달리 이 리스트는 judgeWindow 와 공유되지 않는다).
+  @Volatile private var isCalibrating = false
+  private val calibrationBuffer = ArrayList<List<Double>>()
+  private var calibrationStartMs = 0L
+
   companion object {
     // Nordic UART Service (NUS) 표준 UUID
     private val NUS_SERVICE = UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
@@ -115,6 +127,16 @@ class BleService : Service() {
     const val PREF_PROFILE = "DRIVER_PROFILE"
     const val DEFAULT_PROFILE = "normal"
     val VALID_PROFILES = setOf("strong", "normal", "weak")
+
+    // ── 연속형 개인화 캘리브레이션 (Phase B, calibration.py 대응) ──────────
+    // 3단계 프로필 대신, 캘리브레이션 세션(45초)에서 뽑은 accel_active_p90 + 오프셋으로
+    // 개인별 accel_high 를 직접 계산한다(§진행상황_및_로드맵.md 실험 근거). 계산된 임계값이
+    // 있으면 판정은 profile 기반 대신 이걸 우선 사용한다.
+    const val ACTION_START_CALIBRATION = "ACTION_START_CALIBRATION"
+    const val ACTION_CALIBRATION_DONE = "ACTION_CALIBRATION_DONE"
+    const val EXTRA_THRESHOLDS_JSON = "THRESHOLDS_JSON"
+    const val PREF_CALIBRATED_THRESHOLDS = "CALIBRATED_THRESHOLDS_JSON"
+    const val CALIBRATION_DURATION_MS = 30_000L
 
     // ── 실시간 그래프 스트림 (DataCollectActivity 전용) ──────────────
     // 50Hz 브로드캐스트라 평소엔 낭비다. 수집 화면이 떠 있는 동안만 켠다.
@@ -173,6 +195,13 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
+    // 패턴 파악(연속형 캘리브레이션) 시작. 이미 감시 중인 세션에 바로 적용되며
+    // 재연결이 필요 없다 — sessionProfile 과 달리 캘리브레이션은 즉시 갱신되는 값이다.
+    if (intent?.action == ACTION_START_CALIBRATION) {
+      startCalibration()
+      return START_NOT_STICKY
+    }
+
     val newAddress = intent?.getStringExtra("TARGET_ADDRESS")
     if (newAddress != null) {
       targetAddress = newAddress
@@ -187,6 +216,12 @@ class BleService : Service() {
     // 이번 세션에 적용할 프로필 확정. 이후 CSV 파일명·judge_json 판정에 모두 쓰인다.
     sessionProfile = readProfile()
     Log.i(tag, "세션 프로필: $sessionProfile")
+
+    // 이전에 캘리브레이션해 둔 임계값이 있으면 복원 — 매 주행마다 다시 캘리브레이션할 필요 없다.
+    calibratedThresholdsJson = readCalibratedThresholds()
+    if (calibratedThresholdsJson != null) {
+      Log.i(tag, "캘리브레이션된 임계값 복원: $calibratedThresholdsJson")
+    }
 
     startForegroundServiceNotification("타겟 감시 중: $targetAddress")
     startTargetScan()
@@ -420,6 +455,57 @@ class BleService : Service() {
     return if (saved in VALID_PROFILES) saved!! else DEFAULT_PROFILE
   }
 
+  private fun readCalibratedThresholds(): String? =
+    getSharedPreferences("AgPrefs", MODE_PRIVATE).getString(PREF_CALIBRATED_THRESHOLDS, null)
+
+  // "패턴 파악" 시작 — 이후 CALIBRATION_DURATION_MS 동안 들어오는 원시 샘플을 모은다.
+  // 시작하는 순간 기존 캘리브레이션 값을 즉시 '미설정' 상태로 되돌린다 —
+  // 그래야 패턴 파악 중에 세게 밟아도 판정(및 경고)이 안 걸려서 데이터 수집이 편하다.
+  private fun startCalibration() {
+    calibrationBuffer.clear()
+    calibrationStartMs = System.currentTimeMillis()
+    isCalibrating = true
+    calibratedThresholdsJson = null
+    Log.i(tag, "캘리브레이션 시작 (${CALIBRATION_DURATION_MS / 1000}초) — 완료 전까지 판정 중단")
+  }
+
+  // 캘리브레이션 종료 — 모은 샘플을 calibration.calibrate_thresholds_json 에 넘겨
+  // 개인화된 임계값을 계산하고, 즉시 적용 + prefs 에 저장(다음 주행에도 재사용).
+  private fun finishCalibration() {
+    isCalibrating = false
+    val samples = ArrayList(calibrationBuffer)
+    calibrationBuffer.clear()
+
+    if (samples.isEmpty()) {
+      Log.w(tag, "캘리브레이션 실패: 수집된 샘플 없음")
+      return
+    }
+
+    try {
+      val samplesJson = org.json.JSONArray()
+      for (sample in samples) samplesJson.put(org.json.JSONArray(sample))
+
+      val thresholdsJson = Python.getInstance()
+        .getModule("calibration")
+        .callAttr("calibrate_thresholds_json", samplesJson.toString())
+        .toString()
+
+      calibratedThresholdsJson = thresholdsJson
+      getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
+        .putString(PREF_CALIBRATED_THRESHOLDS, thresholdsJson)
+        .apply()
+
+      Log.i(tag, "캘리브레이션 완료 (${samples.size}샘플): $thresholdsJson")
+
+      val intent = Intent(ACTION_CALIBRATION_DONE)
+      intent.setPackage(packageName)
+      intent.putExtra(EXTRA_THRESHOLDS_JSON, thresholdsJson)
+      sendBroadcast(intent)
+    } catch (e: Exception) {
+      Log.e(tag, "캘리브레이션 계산 실패: ${e.message}", e)
+    }
+  }
+
   private fun writeRawCsv(recvMs: Long, cnt: Int, accel: Double, brake: Double, label: Int) {
     synchronized(csvLock) {
       val w = ensureCsvWriterLocked() ?: return
@@ -517,11 +603,16 @@ class BleService : Service() {
       val accel = accRaw / Q31_SCALE
       sampleBuffer.add(listOf(accel, brake))
       writeRawCsv(recvMs, cnt, accel, brake, label)   // 원시 샘플 + 라벨 CSV 축적 (Phase A)
+      if (isCalibrating) calibrationBuffer.add(listOf(accel, brake))
 
       liveAccels?.set(i, accel.toFloat())
       liveBrakes?.set(i, brake.toFloat())
     }
     flushRawCsv()   // 배치 단위로 flush (앱 강제종료 시 손실 최소화)
+
+    if (isCalibrating && nowMs - calibrationStartMs >= CALIBRATION_DURATION_MS) {
+      finishCalibration()
+    }
 
     if (liveAccels != null && liveBrakes != null) {
       sendBroadcast(Intent(ACTION_LIVE_SAMPLES).apply {
@@ -539,30 +630,39 @@ class BleService : Service() {
     }
   }
 
-  // 윈도우 하나를 Python judge_json 에 넘겨 오조작 여부를 판정한다.
+  // 윈도우 하나를 Python judge_calibrated_json 에 넘겨 오조작 여부를 판정한다.
+  //
+  // 패턴 파악(캘리브레이션) 중이거나, 아직 한 번도 캘리브레이션한 적이 없으면
+  // 판정 자체를 건너뛴다 — 그렇지 않으면 캘리브레이션 도중 세게 밟는 순간에
+  // 오조작 경고가 떠서 데이터 수집이 불편해진다.
+  // "임계값 미설정 = 아직 판정 안 함"이 지금 채택한 모델이다.
   private fun judgeWindow(window: List<List<Double>>) {
+    if (isCalibrating) return
+    val calibrated = calibratedThresholdsJson ?: return
+
     try {
       // 윈도우를 JSON 문자열로 직렬화해 전달 (Chaquopy ArrayList 변환 이슈 회피)
       val samplesJson = org.json.JSONArray()
       for (sample in window) samplesJson.put(org.json.JSONArray(sample))
-      // 프로필을 함께 넘겨 사용자별 임계값으로 판정한다 (judge.py PROFILES).
+
       val resultJson = Python.getInstance()
         .getModule("judge")
-        .callAttr("judge_json", samplesJson.toString(), sessionProfile)
+        .callAttr("judge_calibrated_json", samplesJson.toString(), calibrated)
         .toString()
       val result = JSONObject(resultJson)
       val misop = result.getBoolean("misop")
       val score = result.getDouble("score")
+      val appliedLabel = result.getString("profile")   // 항상 "personalized" (judge_calibrated_json 고정값)
 
       // 판정은 4Hz 로 나온다. 상태가 바뀌는 순간(정상<->오조작)은 항상 남기고,
       // 변화가 없으면 살아있다는 표시로 주기적 하트비트만 남긴다.
       val nowMs = System.currentTimeMillis()
       if (misop != lastLoggedMisop) {
-        Log.i(tag, "판정 변화: misop=$misop score=$score profile=$sessionProfile")
+        Log.i(tag, "판정 변화: misop=$misop score=$score profile=$appliedLabel")
         lastLoggedMisop = misop
         lastJudgeLogMs = nowMs
       } else if (nowMs - lastJudgeLogMs >= JUDGE_LOG_INTERVAL_MS) {
-        Log.d(tag, "판정: misop=$misop score=$score profile=$sessionProfile")
+        Log.d(tag, "판정: misop=$misop score=$score profile=$appliedLabel")
         lastJudgeLogMs = nowMs
       }
 

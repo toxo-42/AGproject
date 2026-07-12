@@ -59,19 +59,21 @@ def thresholds_json(profile: str = DEFAULT_PROFILE) -> str:
     return json.dumps(get_thresholds(profile))
 
 
-def judge(samples: list[list[float]], profile: str = DEFAULT_PROFILE) -> dict:
-    """윈도우 하나를 받아 오조작 여부를 판정.
+def judge_with_thresholds(samples: list[list[float]], thresholds: dict[str, float], label: str) -> dict:
+    """윈도우 하나 + 임계값 세트를 직접 받아 오조작 여부를 판정.
 
-    예시 휴리스틱: 윈도우 안에서 '엑셀을 깊게 밟으면서 브레이크는 거의
-    안 밟은' 샘플 비율이 임계값을 넘으면 오조작으로 본다.
+    3단계 프로필(get_thresholds)이든, 캘리브레이션으로 계산한 연속형 임계값
+    (calibration.calibrate_thresholds)이든 이 함수 입장에서는 그냥 숫자 3개일
+    뿐이다 — '어디서 온 임계값인가'와 '지금 오조작인가'를 분리하기 위한 공용 코어.
+
+    label 은 결과의 "profile" 필드에 그대로 실린다(로그/디버깅용 표시 이름).
     """
     if not samples:
-        return {"misop": False, "score": 0.0, "profile": profile, "reason": "empty"}
+        return {"misop": False, "score": 0.0, "profile": label, "reason": "empty"}
 
-    th = get_thresholds(profile)
-    accel_high = th["accel_high"]
-    brake_low = th["brake_low"]
-    high_ratio = th["high_ratio"]
+    accel_high = thresholds["accel_high"]
+    brake_low = thresholds["brake_low"]
+    high_ratio = thresholds["high_ratio"]
 
     hits = 0
     for accel, brake in samples:
@@ -81,15 +83,24 @@ def judge(samples: list[list[float]], profile: str = DEFAULT_PROFILE) -> dict:
     score = hits / len(samples)
     misop = score >= high_ratio
     reason = (
-        f"[{profile}] 엑셀>={accel_high} & 브레이크<={brake_low} 비율 {score:.2f}"
+        f"[{label}] 엑셀>={accel_high} & 브레이크<={brake_low} 비율 {score:.2f}"
         f" ({'>=' if misop else '<'} {high_ratio})"
     )
     return {
         "misop": misop,
         "score": round(score, 3),
-        "profile": profile,
+        "profile": label,
         "reason": reason,
     }
+
+
+def judge(samples: list[list[float]], profile: str = DEFAULT_PROFILE) -> dict:
+    """윈도우 하나를 받아 오조작 여부를 판정.
+
+    예시 휴리스틱: 윈도우 안에서 '엑셀을 깊게 밟으면서 브레이크는 거의
+    안 밟은' 샘플 비율이 임계값을 넘으면 오조작으로 본다.
+    """
+    return judge_with_thresholds(samples, get_thresholds(profile), profile)
 
 
 def judge_json(samples_json: str, profile: str = DEFAULT_PROFILE) -> str:
@@ -109,3 +120,20 @@ def judge_json(samples_json: str, profile: str = DEFAULT_PROFILE) -> str:
     """
     samples = json.loads(samples_json)
     return json.dumps(judge(samples, profile), ensure_ascii=False)
+
+
+def judge_calibrated_json(samples_json: str, thresholds_json_str: str) -> str:
+    """Chaquopy 경계용: 캘리브레이션으로 계산한 연속형 임계값으로 판정.
+
+    3단계 프로필 대신 개인화된 임계값(calibration.calibrate_thresholds 로 만든
+    {"accel_high":.., "brake_low":.., "high_ratio":..} 딕셔너리)을 쓸 때 이걸 호출한다.
+    judge_json 과 마찬가지로 Kotlin<->Python 경계는 JSON 문자열로만 주고받는다.
+
+    Kotlin 쪽:
+      val thresholdsJson = JSONObject(calibratedMap).toString()
+      val resultJson = py.callAttr("judge_calibrated_json", samplesJson, thresholdsJson).toString()
+    """
+    samples = json.loads(samples_json)
+    thresholds = json.loads(thresholds_json_str)
+    result = judge_with_thresholds(samples, thresholds, "personalized")
+    return json.dumps(result, ensure_ascii=False)

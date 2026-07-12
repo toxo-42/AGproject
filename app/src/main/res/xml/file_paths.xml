@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- CSV 내보내기용 FileProvider 경로. cacheDir에 만든 zip만 공유하면 되므로 cache-path만 노출한다. -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="logs_export" path="." />
+</paths>

@@ -18,6 +18,20 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
 
+    <!-- CSV 로그 내보내기(개발자용 반복 학습 편의 — filesDir/logs 전체를 zip으로 공유 시트에) -->
+    <ImageButton
+        android:id="@+id/btnExportCsv"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_marginStart="8dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@android:drawable/ic_menu_save"
+        app:tint="@color/accent_blue"
+        android:contentDescription="@string/desc_export_csv"
+        app:layout_constraintStart_toEndOf="@id/tvCollectTitle"
+        app:layout_constraintTop_toTopOf="@id/tvCollectTitle"
+        app:layout_constraintBottom_toBottomOf="@id/tvCollectTitle" />
+
     <!-- 라벨링 표시등: label=1 인 동안 붉게 켜진다 -->
     <TextView
         android:id="@+id/tvLabelIndicator"
@@ -83,7 +97,7 @@
         android:layout_marginBottom="14dp"
         app:singleSelection="true"
         app:selectionRequired="true"
-        app:layout_constraintBottom_toTopOf="@id/btnLabelMisop"
+        app:layout_constraintBottom_toTopOf="@id/btnCalibrate"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
@@ -118,6 +132,22 @@
             app:strokeColor="@color/accent_blue" />
 
     </com.google.android.material.button.MaterialButtonToggleGroup>
+
+    <!-- 연속형 개인화 캘리브레이션("패턴 파악") — 45초간 실주행 패턴을 모아 accel_high를 개인화 -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnCalibrate"
+        style="@style/Widget.MaterialComponents.Button"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:layout_marginBottom="10dp"
+        android:text="@string/btn_calibrate"
+        android:textColor="@color/text_white"
+        android:textSize="15sp"
+        app:backgroundTint="@color/accent_blue"
+        app:cornerRadius="12dp"
+        app:layout_constraintBottom_toTopOf="@id/btnLabelMisop"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnLabelMisop"

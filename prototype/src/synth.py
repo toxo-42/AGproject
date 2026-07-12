@@ -1,4 +1,4 @@
-"""50Hz 합성 센서 데이터 생성기.
+"""200Hz 합성 센서 데이터 생성기 (실기기 샘플레이트와 동일하게 맞춤).
 
 실기기 RAW 데이터가 아직 안 들어오므로, 정상 주행과 페달 오조작 패턴을
 가짜로 만들어 판정 로직(judge)을 PC에서 먼저 굴려보기 위한 모듈이다.
@@ -15,7 +15,10 @@ from __future__ import annotations
 import math
 import random
 
-SAMPLE_RATE_HZ = 50
+# 실기기는 50Hz 배치 × 4샘플 = 200Hz로 들어온다(BLE_RAW_스트림_규격.md).
+# 이전엔 여기가 50Hz를 가정해 앱(BleService.WINDOW_SIZE=50 @ 200Hz = 0.25초)과
+# 윈도우 길이가 4배 어긋나 있었다 -> 실기기와 동일하게 200Hz로 통일.
+SAMPLE_RATE_HZ = 200
 
 
 def _clamp(x: float) -> float:

@@ -8,15 +8,24 @@ import android.content.IntentFilter
 import android.content.res.ColorStateList
 import android.os.Build
 import android.os.Bundle
+import android.os.CountDownTimer
 import android.util.Log
+import android.widget.ImageButton
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
 import org.json.JSONObject
+import java.io.BufferedOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /**
  * 데이터 수집 화면 (Phase A).
@@ -36,8 +45,11 @@ class DataCollectActivity : AppCompatActivity() {
   private lateinit var tvLabelIndicator: TextView
   private lateinit var toggleProfile: MaterialButtonToggleGroup
   private lateinit var btnLabelMisop: MaterialButton
+  private lateinit var btnExportCsv: ImageButton
+  private lateinit var btnCalibrate: MaterialButton
 
   private var isLabelingMisop = false
+  private var calibrationTimer: CountDownTimer? = null
 
   // 이미 적용된 프로필이면 Python 호출을 건너뛴다.
   // (onCreate 에서 toggleProfile.check() 가 리스너를 먼저 깨워 중복 호출되는 것을 막음)
@@ -49,19 +61,26 @@ class DataCollectActivity : AppCompatActivity() {
 
   private val liveReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
-      if (intent?.action != BleService.ACTION_LIVE_SAMPLES) return
-      val accels = intent.getFloatArrayExtra(BleService.EXTRA_ACCELS) ?: return
-      val brakes = intent.getFloatArrayExtra(BleService.EXTRA_BRAKES) ?: return
-      if (accels.isEmpty() || accels.size != brakes.size) return
+      when (intent?.action) {
+        BleService.ACTION_LIVE_SAMPLES -> {
+          val accels = intent.getFloatArrayExtra(BleService.EXTRA_ACCELS) ?: return
+          val brakes = intent.getFloatArrayExtra(BleService.EXTRA_BRAKES) ?: return
+          if (accels.isEmpty() || accels.size != brakes.size) return
 
-      graph.pushBatch(accels, brakes)
+          graph.pushBatch(accels, brakes)
 
-      val now = System.currentTimeMillis()
-      if (now - lastTextUpdateMs >= 100) {
-        lastTextUpdateMs = now
-        val a = accels.last()
-        val b = brakes.last()
-        tvLiveValues.text = String.format("accel %.3f    brake %.3f", a, b)
+          val now = System.currentTimeMillis()
+          if (now - lastTextUpdateMs >= 100) {
+            lastTextUpdateMs = now
+            val a = accels.last()
+            val b = brakes.last()
+            tvLiveValues.text = String.format("accel %.3f    brake %.3f", a, b)
+          }
+        }
+        BleService.ACTION_CALIBRATION_DONE -> {
+          val json = intent.getStringExtra(BleService.EXTRA_THRESHOLDS_JSON) ?: return
+          onCalibrationDone(json)
+        }
       }
     }
   }
@@ -75,6 +94,11 @@ class DataCollectActivity : AppCompatActivity() {
     tvLabelIndicator = findViewById(R.id.tvLabelIndicator)
     toggleProfile = findViewById(R.id.toggleProfile)
     btnLabelMisop = findViewById(R.id.btnLabelMisop)
+    btnExportCsv = findViewById(R.id.btnExportCsv)
+    btnCalibrate = findViewById(R.id.btnCalibrate)
+
+    btnExportCsv.setOnClickListener { exportCsvLogs() }
+    btnCalibrate.setOnClickListener { startCalibrationFlow() }
 
     toggleProfile.addOnButtonCheckedListener { _, checkedId, isChecked ->
       if (!isChecked) return@addOnButtonCheckedListener
@@ -97,7 +121,10 @@ class DataCollectActivity : AppCompatActivity() {
 
   override fun onResume() {
     super.onResume()
-    val filter = IntentFilter(BleService.ACTION_LIVE_SAMPLES)
+    val filter = IntentFilter().apply {
+      addAction(BleService.ACTION_LIVE_SAMPLES)
+      addAction(BleService.ACTION_CALIBRATION_DONE)
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       registerReceiver(liveReceiver, filter, RECEIVER_NOT_EXPORTED)
     } else {
@@ -110,6 +137,9 @@ class DataCollectActivity : AppCompatActivity() {
     super.onPause()
     // 화면을 벗어나면 50Hz 브로드캐스트를 끈다. 라벨링도 켜둔 채 나가지 않게 정리.
     setLiveStream(false)
+    // 캘리브레이션 자체는 BleService 안에서 화면과 무관하게 계속 진행된다 —
+    // 여기서 취소하는 건 화면에 남은 카운트다운 UI뿐.
+    calibrationTimer?.cancel()
     if (isLabelingMisop) {
       isLabelingMisop = false
       sendLabelToService(false)
@@ -182,6 +212,75 @@ class DataCollectActivity : AppCompatActivity() {
       action = BleService.ACTION_SET_LIVE_STREAM
       putExtra(BleService.EXTRA_LIVE_STREAM, enabled)
     })
+  }
+
+  // --- 연속형 개인화 캘리브레이션("패턴 파악") ---
+
+  private fun startCalibrationFlow() {
+    startService(Intent(this, BleService::class.java).apply {
+      action = BleService.ACTION_START_CALIBRATION
+    })
+
+    btnCalibrate.isEnabled = false
+    calibrationTimer?.cancel()
+    calibrationTimer = object : CountDownTimer(BleService.CALIBRATION_DURATION_MS, 1_000) {
+      override fun onTick(millisUntilFinished: Long) {
+        val secondsLeft = (millisUntilFinished / 1000).toInt() + 1
+        btnCalibrate.text = getString(R.string.btn_calibrate_running, secondsLeft)
+      }
+
+      override fun onFinish() {
+        // 실제 적용 확인은 ACTION_CALIBRATION_DONE 브로드캐스트로 받지만,
+        // 못 받는 경우(예: 계산 실패)에도 버튼은 복구되게 여기서도 되돌린다.
+        btnCalibrate.isEnabled = true
+        btnCalibrate.setText(R.string.btn_calibrate)
+      }
+    }.start()
+  }
+
+  private fun onCalibrationDone(thresholdsJson: String) {
+    calibrationTimer?.cancel()
+    btnCalibrate.isEnabled = true
+    btnCalibrate.setText(R.string.btn_calibrate)
+
+    try {
+      val th = JSONObject(thresholdsJson)
+      val accelHigh = th.getDouble("accel_high")
+      val brakeLow = th.getDouble("brake_low")
+      graph.setThresholds(accelHigh, brakeLow)
+      Toast.makeText(this, getString(R.string.msg_calibration_done, accelHigh), Toast.LENGTH_LONG).show()
+      Log.i(tag, "캘리브레이션 적용: $thresholdsJson")
+    } catch (e: Exception) {
+      Log.e(tag, "캘리브레이션 결과 파싱 실패: ${e.message}", e)
+    }
+  }
+
+  // --- CSV 내보내기 (개발자용: 반복 학습 시 adb 없이 세션 CSV 전부를 한 번에 회수) ---
+
+  private fun exportCsvLogs() {
+    val logsDir = File(filesDir, "logs")
+    val csvFiles = logsDir.listFiles { f -> f.extension == "csv" }
+    if (csvFiles.isNullOrEmpty()) {
+      Toast.makeText(this, getString(R.string.msg_export_empty), Toast.LENGTH_SHORT).show()
+      return
+    }
+
+    val zipFile = File(cacheDir, "pedal_logs_${System.currentTimeMillis()}.zip")
+    ZipOutputStream(BufferedOutputStream(FileOutputStream(zipFile))).use { zos ->
+      for (f in csvFiles) {
+        zos.putNextEntry(ZipEntry(f.name))
+        f.inputStream().use { it.copyTo(zos) }
+        zos.closeEntry()
+      }
+    }
+
+    val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", zipFile)
+    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+      type = "application/zip"
+      putExtra(Intent.EXTRA_STREAM, uri)
+      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    startActivity(Intent.createChooser(shareIntent, getString(R.string.title_export_chooser)))
   }
 
   // --- UI ---

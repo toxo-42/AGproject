@@ -44,4 +44,12 @@
   <string name="label_indicator_on">● 오조작 기록 중</string>
   <string name="live_values_idle">accel  —      brake  —</string>
   <string name="graph_legend">— accel   — brake   ─ 붉은 실선: 엑셀 임계값   ┄ 붉은 점선: 브레이크 임계값</string>
+  <string name="desc_export_csv">CSV 로그 내보내기</string>
+  <string name="msg_export_empty">내보낼 CSV 로그가 없습니다</string>
+  <string name="title_export_chooser">CSV 로그 내보내기</string>
+
+  <!-- 연속형 개인화 캘리브레이션(Phase B "패턴 파악") -->
+  <string name="btn_calibrate">패턴 파악 시작 </string>
+  <string name="btn_calibrate_running">패턴 파악 중… %1$d초</string>
+  <string name="msg_calibration_done">캘리브레이션 완료: 엑셀 임계값 %1$.2f 적용됨</string>
 </resources>
