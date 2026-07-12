@@ -45,16 +45,32 @@ class BleService : Service() {
   private var lastMisopShown = false   // 같은 오조작 연속 트리거 방지(예시)
   private var lastCnt = -1             // 직전 샘플 cnt (누락 검출용, -1 = 아직 없음)
 
-  // ── RAW 원시 샘플 CSV 로깅 (Phase A: 학습 데이터 수집) ──────────────
-  // 첫 RAW 샘플이 실제로 도착한 시점에 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
+  // ── RAW 원시 샘플 CSV 로깅 (Phase A/E: 학습 데이터 + 증거자료) ──────────
+  // 첫 윈도우가 찰 때 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
   // 저장 위치: filesDir/logs/pedal_yyyyMMdd_HHmmss.csv (권한 불필요, adb pull 로 회수)
-  // 컬럼: recv_epoch_ms,cnt,accel,brake  (원시 샘플 1개당 1줄, 판정 윈도우와 무관하게 전부 기록)
+  // 컬럼: date,time,brake,accel,module_err,pedal_err,accel_exceed,label
+  //   - 기록 주기는 200Hz 원시 샘플 전부가 아니라 **판정 윈도우 하나당 1행(4Hz)**이다.
+  //     pedal_err/accel_exceed 가 애초에 4Hz 단위라 200Hz로 찍어도 값이 반복될 뿐이고,
+  //     증거자료로서 사람이 열어볼 수 있는 크기가 더 중요하다고 판단(2026-07-13 사용자 결정,
+  //     처음엔 200Hz 전부 남겼다가 "초당 데이터가 너무 많다"는 피드백으로 축소).
+  //     brake/accel 은 그 윈도우의 마지막 샘플 값을 대표값으로 쓴다.
+  //   - date/time: 사람이 읽을 수 있는 형식(원시 epoch 대신).
+  //   - module_err: 그 순간 미해결 장치 오류가 있었는지("module_err"/"none",
+  //     isErrorDialogShowing 그대로). 0/1 대신 문자열로 남겨 바로 알아볼 수 있게 함(2026-07-13).
+  //   - pedal_err: 그 윈도우가 오조작으로 판정됐는지("pedal_err"/"none") — accel이 임계값을
+  //     넘고 brake는 거의 안 밟힌 상태로 잡혔다는 뜻(judge.py 의 misop과 동일 개념, 컬럼명만
+  //     사용자 요청으로 pedal_err로 통일).
+  //   - accel_exceed: 대표 accel 값이 그 순간 개인화 임계값(accel_high)을 넘은 만큼
+  //     (안 넘었거나 아직 캘리브레이션 전이면 0).
+  //   - label: 수동 라벨링(개발자용 지도학습 정답, Phase A) 그대로 유지.
   //
   // BLE notify 콜백은 여러 바인더 스레드에서 올라온다 → BufferedWriter 접근은 전부 csvLock 아래에서.
   // csvClosed 는 종료 후 뒤늦게 도착한 콜백이 새 세션 파일을 되살리는 것을 막는다.
   private val csvLock = Any()
   private var csvWriter: java.io.BufferedWriter? = null
   private var csvClosed = false
+  private val csvDateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
+  private val csvTimeFormat = java.text.SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
   // ── 라벨링 (Phase A: 지도학습용 정답 수집) ────────────────────────
   // MainActivity 의 '오조작' 토글이 ACTION_SET_LABEL 로 갱신한다.
@@ -79,6 +95,10 @@ class BleService : Service() {
   // 이전 세션에 캘리브레이션한 값이 있으면 연결 시점에 prefs 에서 복원해 재사용한다
   // (Phase C: "매번 재분류 X").
   @Volatile private var calibratedThresholdsJson: String? = null
+
+  // calibratedThresholdsJson 에서 accel_high 만 미리 파싱해둔 캐시.
+  // writeRawCsv 가 200Hz 로 호출되는데 그때마다 JSON을 파싱하면 낭비라 갱신 시점에만 파싱한다.
+  @Volatile private var currentAccelHigh: Double? = null
 
   // 캘리브레이션 수집 중에만 true. BLE 콜백 스레드가 쓰고 읽는다(단일 스레드 흐름이라 lock 불필요 —
   // sampleBuffer 와 달리 이 리스트는 judgeWindow 와 공유되지 않는다).
@@ -195,7 +215,7 @@ class BleService : Service() {
     // 캘리브레이션 초기화 — 삭제 후 재설치한 것처럼 되돌린다. 다시 패턴 파악하기 전까지
     // judgeWindow 가 판정을 건너뛰므로(calibratedThresholdsJson == null) 오조작 감지도 꺼진다.
     if (intent?.action == ACTION_CLEAR_CALIBRATION) {
-      calibratedThresholdsJson = null
+      applyCalibratedThresholds(null)
       getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
         .remove(PREF_CALIBRATED_THRESHOLDS)
         .apply()
@@ -215,7 +235,7 @@ class BleService : Service() {
     }
 
     // 이전에 캘리브레이션해 둔 임계값이 있으면 복원 — 매 주행마다 다시 캘리브레이션할 필요 없다.
-    calibratedThresholdsJson = readCalibratedThresholds()
+    applyCalibratedThresholds(readCalibratedThresholds())
     if (calibratedThresholdsJson != null) {
       Log.i(tag, "캘리브레이션된 임계값 복원: $calibratedThresholdsJson")
     }
@@ -434,7 +454,7 @@ class BleService : Service() {
       val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
       val file = java.io.File(dir, "pedal_${ts}.csv")
       java.io.BufferedWriter(java.io.FileWriter(file, true)).also {
-        it.write("recv_epoch_ms,cnt,accel,brake,label\n")
+        it.write("date,time,brake,accel,module_err,pedal_err,accel_exceed,label\n")
         csvWriter = it
         Log.i(tag, "RAW 로깅 시작: ${file.absolutePath}")
       }
@@ -447,6 +467,17 @@ class BleService : Service() {
   private fun readCalibratedThresholds(): String? =
     getSharedPreferences("AgPrefs", MODE_PRIVATE).getString(PREF_CALIBRATED_THRESHOLDS, null)
 
+  // calibratedThresholdsJson 과 currentAccelHigh(캐시)를 항상 같이 갱신 — 따로 손대면
+  // 둘이 어긋나서 CSV의 accel_exceed 가 실제 판정 임계값과 다른 값을 쓰게 된다.
+  private fun applyCalibratedThresholds(json: String?) {
+    calibratedThresholdsJson = json
+    currentAccelHigh = try {
+      json?.let { JSONObject(it).getDouble("accel_high") }
+    } catch (e: Exception) {
+      null
+    }
+  }
+
   // "패턴 파악" 시작 — 이후 CALIBRATION_DURATION_MS 동안 들어오는 원시 샘플을 모은다.
   // 시작하는 순간 기존 캘리브레이션 값을 즉시 '미설정' 상태로 되돌린다 —
   // 그래야 패턴 파악 중에 세게 밟아도 판정(및 경고)이 안 걸려서 데이터 수집이 편하다.
@@ -454,7 +485,7 @@ class BleService : Service() {
     calibrationBuffer.clear()
     calibrationStartMs = System.currentTimeMillis()
     isCalibrating = true
-    calibratedThresholdsJson = null
+    applyCalibratedThresholds(null)
     Log.i(tag, "캘리브레이션 시작 (${CALIBRATION_DURATION_MS / 1000}초) — 완료 전까지 판정 중단")
   }
 
@@ -479,7 +510,7 @@ class BleService : Service() {
         .callAttr("calibrate_thresholds_json", samplesJson.toString())
         .toString()
 
-      calibratedThresholdsJson = thresholdsJson
+      applyCalibratedThresholds(thresholdsJson)
       getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
         .putString(PREF_CALIBRATED_THRESHOLDS, thresholdsJson)
         .apply()
@@ -495,14 +526,21 @@ class BleService : Service() {
     }
   }
 
-  private fun writeRawCsv(recvMs: Long, cnt: Int, accel: Double, brake: Double, label: Int) {
+  private fun writeRawCsv(recvMs: Long, accel: Double, brake: Double, label: Int) {
     synchronized(csvLock) {
       val w = ensureCsvWriterLocked() ?: return
       try {
-        // accel/brake 는 소수 4자리로 반올림(Q31 원본보다 촘촘할 필요 없음 → 줄 크기 안정).
+        val d = Date(recvMs)
+        // 0/1 대신 문자열로 남겨서 CSV를 열어봤을 때 바로 무슨 뜻인지 알 수 있게 한다.
+        val moduleErr = if (isErrorDialogShowing) "module_err" else "none"
+        val pedalErr = if (lastLoggedMisop == true) "pedal_err" else "none"
+        val accelHighNow = currentAccelHigh
+        val exceed = if (accelHighNow != null && accel > accelHighNow) accel - accelHighNow else 0.0
+        // accel/brake/exceed 는 소수 4자리로 반올림(Q31 원본보다 촘촘할 필요 없음 → 줄 크기 안정).
         w.write(
-          "$recvMs,$cnt,${String.format(Locale.US, "%.4f", accel)}," +
-            "${String.format(Locale.US, "%.4f", brake)},$label\n"
+          "${csvDateFormat.format(d)},${csvTimeFormat.format(d)}," +
+            "${String.format(Locale.US, "%.4f", brake)},${String.format(Locale.US, "%.4f", accel)}," +
+            "$moduleErr,$pedalErr,${String.format(Locale.US, "%.4f", exceed)},$label\n"
         )
       } catch (e: Exception) {
         Log.e(tag, "CSV 쓰기 실패: ${e.message}")
@@ -563,12 +601,6 @@ class BleService : Service() {
       rawSampleCount = 0
     }
 
-    // 이 배치를 수신한 폰 로컬 시각(같은 배치 내 샘플은 cnt 로 순서 구분).
-    val recvMs = nowMs
-    // 라벨은 배치 시작 시점에 한 번만 읽는다. 배치 처리 도중 토글이 바뀌어도
-    // 같은 배치(20ms) 안의 샘플들은 같은 라벨을 갖는 편이 해석하기 쉽다.
-    val label = currentLabel
-
     // 실시간 그래프용 배치 버퍼 (스트림이 꺼져 있으면 만들지 않는다)
     val streaming = liveStreamEnabled
     val liveAccels = if (streaming) FloatArray(count) else null
@@ -591,13 +623,11 @@ class BleService : Service() {
       val brake = brkRaw / Q31_SCALE
       val accel = accRaw / Q31_SCALE
       sampleBuffer.add(listOf(accel, brake))
-      writeRawCsv(recvMs, cnt, accel, brake, label)   // 원시 샘플 + 라벨 CSV 축적 (Phase A)
       if (isCalibrating) calibrationBuffer.add(listOf(accel, brake))
 
       liveAccels?.set(i, accel.toFloat())
       liveBrakes?.set(i, brake.toFloat())
     }
-    flushRawCsv()   // 배치 단위로 flush (앱 강제종료 시 손실 최소화)
 
     if (isCalibrating && nowMs - calibrationStartMs >= CALIBRATION_DURATION_MS) {
       finishCalibration()
@@ -615,7 +645,14 @@ class BleService : Service() {
     if (sampleBuffer.size >= WINDOW_SIZE) {
       val window = ArrayList(sampleBuffer)   // 복사본 전달
       sampleBuffer.clear()
-      judgeWindow(window)
+      judgeWindow(window)   // lastLoggedMisop 를 이 윈도우 결과로 갱신 — 아래 CSV 기록이 최신값을 씀
+
+      // CSV는 200Hz 전부가 아니라 판정 주기(4Hz, 윈도우 하나당 1행)로만 남긴다.
+      // misop/accel_exceed 는 애초에 4Hz 판정 단위라 200Hz로 찍어도 값이 반복될 뿐이고,
+      // 증거자료 목적상 사람이 열어볼 수 있는 크기가 더 중요하다고 판단(2026-07-13 사용자 결정).
+      val last = window.last()
+      writeRawCsv(nowMs, accel = last[0], brake = last[1], label = currentLabel)
+      flushRawCsv()
     }
   }
 
@@ -642,6 +679,9 @@ class BleService : Service() {
       val misop = result.getBoolean("misop")
       val score = result.getDouble("score")
       val appliedLabel = result.getString("profile")   // 항상 "personalized" (judge_calibrated_json 고정값)
+
+      // misop 결과는 lastLoggedMisop 에 남겨서 handleRawData 의 CSV 기록(같은 윈도우, 4Hz)이
+      // 방금 계산된 값을 그대로 쓴다.
 
       // 판정은 4Hz 로 나온다. 상태가 바뀌는 순간(정상<->오조작)은 항상 남기고,
       // 변화가 없으면 살아있다는 표시로 주기적 하트비트만 남긴다.

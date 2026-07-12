@@ -67,7 +67,11 @@ class DataCollectActivity : AppCompatActivity() {
             lastTextUpdateMs = now
             val a = accels.last()
             val b = brakes.last()
-            tvLiveValues.text = String.format("accel %.3f    brake %.3f", a, b)
+            // 급발진 방지가 목적이라 accel 임계값만 의미 있음 — brake는 임계값 없이 값만 표시.
+            tvLiveValues.text = String.format(
+              "accel %.3f (임계 %.2f)    brake %.3f",
+              a, graph.getAccelHigh(), b
+            )
           }
         }
         BleService.ACTION_CALIBRATION_DONE -> {

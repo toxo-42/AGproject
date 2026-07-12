@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- CSV 내보내기용 FileProvider 경로. cacheDir에 만든 zip만 공유하면 되므로 cache-path만 노출한다. -->
+<!-- CSV 내보내기용 FileProvider 경로.
+     - cache-path: DataCollectActivity의 "전체 zip 내보내기"(개발자용)가 cacheDir에 만드는 zip.
+     - files-path(logs): filesDir/logs 의 세션 CSV를 DeviceManagerActivity가 직접 공유할 때 필요. -->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="logs_export" path="." />
+    <files-path name="logs" path="logs/" />
 </paths>

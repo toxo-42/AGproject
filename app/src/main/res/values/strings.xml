@@ -39,10 +39,26 @@
   <string name="label_indicator_off">○ 정상</string>
   <string name="label_indicator_on">● 오조작 기록 중</string>
   <string name="live_values_idle">accel  —      brake  —</string>
-  <string name="graph_legend">— accel   — brake   ─ 붉은 실선: 엑셀 임계값   ┄ 붉은 점선: 브레이크 임계값</string>
+  <string name="graph_legend">🟢 accel 🔵 brake   🔴 붉은 실선: 엑셀 임계값</string>
   <string name="desc_export_csv">CSV 로그 내보내기</string>
   <string name="msg_export_empty">내보낼 CSV 로그가 없습니다</string>
   <string name="title_export_chooser">CSV 로그 내보내기</string>
+
+  <!-- 로깅 데이터 추출(Phase E): 설정 화면에서 세션 선택 후 내보내기 -->
+  <string name="desc_export_logs">로깅 데이터 추출</string>
+  <string name="title_select_session">내보낼 주행 기록 선택</string>
+  <string name="msg_no_sessions">저장된 주행 기록이 없습니다</string>
+  <string name="msg_signing_failed">서명 생성에 실패해 서명 없이 내보냅니다</string>
+
+  <!-- 주행 기록 삭제 -->
+  <string name="desc_delete_logs">주행 기록 삭제</string>
+  <string name="title_select_session_delete">삭제할 주행 기록 선택</string>
+  <string name="option_delete_all">전체 삭제 (%1$d개 세션)</string>
+  <string name="title_delete_confirm">정말 삭제할까요?</string>
+  <string name="msg_delete_one_confirm">이 주행 기록을 삭제하면 복구할 수 없습니다.</string>
+  <string name="msg_delete_all_confirm">저장된 주행 기록 %1$d개를 전부 삭제하면 복구할 수 없습니다.</string>
+  <string name="btn_delete_confirm">삭제</string>
+  <string name="msg_delete_done">삭제했습니다</string>
 
   <!-- 연속형 개인화 캘리브레이션(Phase B "패턴 파악") -->
   <string name="btn_calibrate">패턴 파악 시작 </string>

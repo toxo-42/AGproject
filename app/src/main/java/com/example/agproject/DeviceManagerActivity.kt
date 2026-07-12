@@ -13,8 +13,14 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
+import java.io.BufferedOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class DeviceManagerActivity : AppCompatActivity() {
 
@@ -49,6 +55,18 @@ class DeviceManagerActivity : AppCompatActivity() {
     val btnOpenSettings = findViewById<ImageButton>(R.id.btnOpenSettings)
     btnOpenSettings.setOnClickListener {
       showTTSSettingsDialog()
+    }
+
+    // 로깅 데이터 추출(Phase E) — 세션 선택 후 CSV를 공유 시트로 내보낸다.
+    val btnExportLogs = findViewById<ImageButton>(R.id.btnExportLogs)
+    btnExportLogs.setOnClickListener {
+      showSessionPickerAndExport()
+    }
+
+    // 주행 기록 삭제 — 계속 쌓이기만 하는 로그를 앱 안에서 정리(재설치 없이).
+    val btnDeleteLogs = findViewById<ImageButton>(R.id.btnDeleteLogs)
+    btnDeleteLogs.setOnClickListener {
+      showSessionPickerAndDelete()
     }
 
     // 4. 저장된 기기 정보 불러오기
@@ -150,6 +168,153 @@ class DeviceManagerActivity : AppCompatActivity() {
     } catch (e: Exception) { e.printStackTrace() }
   }
 
+  // --- 로깅 데이터 추출 (Phase E) ---
+
+  // 세션 하나 = pedal_<타임스탬프>.csv 파일 하나(원시+판정 결과가 이제 한 파일에 다 담김).
+  // BleService 가 항상 이 이름 패턴으로 만들기 때문에 이걸로 세션을 구분한다.
+  private val sessionTimestampRegex = Regex("""^pedal_(\d{8}_\d{6})\.csv$""")
+
+  private fun listSessionTimestamps(): List<String> {
+    val logsDir = File(filesDir, "logs")
+    val files = logsDir.listFiles() ?: return emptyList()
+    return files.mapNotNull { sessionTimestampRegex.matchEntire(it.name)?.groupValues?.get(1) }
+      .sortedDescending()   // 최신 세션이 위로
+  }
+
+  // "20260713_032847"(BleService 파일명 형식) -> "26/07/13-03:28:47" 로 사람이 보기 좋게.
+  // 파싱 실패하면(예상 못한 형식) 원본 문자열을 그대로 보여준다.
+  private fun formatSessionLabel(timestamp: String): String {
+    return try {
+      val parsed = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).parse(timestamp)
+      java.text.SimpleDateFormat("yy/MM/dd-HH:mm:ss", Locale.US).format(parsed!!)
+    } catch (e: Exception) {
+      timestamp
+    }
+  }
+
+  private fun showSessionPickerAndExport() {
+    val timestamps = listSessionTimestamps()
+    if (timestamps.isEmpty()) {
+      Toast.makeText(this, R.string.msg_no_sessions, Toast.LENGTH_SHORT).show()
+      return
+    }
+
+    val labels = timestamps.map { formatSessionLabel(it) }.toTypedArray()
+
+    AlertDialog.Builder(this)
+      .setTitle(R.string.title_select_session)
+      .setItems(labels) { _, which -> exportSession(timestamps[which]) }
+      .show()
+  }
+
+  // CSV + 서명(.sig) + 공개키(pubkey.pem) + 검증 스크립트를 묶어 내보낸다.
+  // 검증 스크립트를 zip 안에 같이 넣는 이유: 받는 쪽(경찰/보험사)이 이 저장소나 uv,
+  // 심지어 pip install 도 없이 `python3 verify_signature.py <csv>` 만으로 바로 검증할 수
+  // 있게 하기 위함(스크립트가 표준 라이브러리만으로 ECDSA를 직접 구현함, 2026-07-14 사용자
+  // 피드백 — "검증은 다른 컴퓨터에서 하는 건데 내 alias/pip install 전제는 의미 없다").
+  private fun exportSession(timestamp: String) {
+    val logsDir = File(filesDir, "logs")
+    val pedalFile = File(logsDir, "pedal_${timestamp}.csv")
+    if (!pedalFile.exists()) {
+      Toast.makeText(this, R.string.msg_no_sessions, Toast.LENGTH_SHORT).show()
+      return
+    }
+
+    val signatureBase64 = try {
+      EvidenceSigner.signFile(pedalFile)
+    } catch (e: Exception) {
+      Toast.makeText(this, R.string.msg_signing_failed, Toast.LENGTH_LONG).show()
+      null
+    }
+
+    val zipFile = File(cacheDir, "session_${timestamp}_signed.zip")
+    ZipOutputStream(BufferedOutputStream(FileOutputStream(zipFile))).use { zos ->
+      zos.putNextEntry(ZipEntry(pedalFile.name))
+      pedalFile.inputStream().use { it.copyTo(zos) }
+      zos.closeEntry()
+
+      if (signatureBase64 != null) {
+        zos.putNextEntry(ZipEntry("${pedalFile.name}.sig"))
+        zos.write(signatureBase64.toByteArray())
+        zos.closeEntry()
+
+        zos.putNextEntry(ZipEntry("pubkey.pem"))
+        zos.write(EvidenceSigner.publicKeyPem().toByteArray())
+        zos.closeEntry()
+
+        zos.putNextEntry(ZipEntry("verify_signature.py"))
+        assets.open("verify_signature.py").use { it.copyTo(zos) }
+        zos.closeEntry()
+
+        // 컴퓨터를 잘 모르는 사람도 검증할 수 있게 사용법을 평문으로 동봉(2026-07-14 사용자 요청).
+        zos.putNextEntry(ZipEntry("README_검증방법.txt"))
+        assets.open("README_검증방법.txt").use { it.copyTo(zos) }
+        zos.closeEntry()
+      }
+    }
+
+    val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", zipFile)
+    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+      type = "application/zip"
+      putExtra(Intent.EXTRA_STREAM, uri)
+      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    startActivity(Intent.createChooser(shareIntent, getString(R.string.desc_export_logs)))
+  }
+
+  // --- 주행 기록 삭제 ---
+  // filesDir/logs 는 세션마다 파일이 계속 쌓이기만 하고 자동으로 안 지워진다.
+  // 재설치 없이 앱 안에서 정리할 수 있게 개별/전체 삭제를 제공한다.
+
+  private fun showSessionPickerAndDelete() {
+    val timestamps = listSessionTimestamps()
+    if (timestamps.isEmpty()) {
+      Toast.makeText(this, R.string.msg_no_sessions, Toast.LENGTH_SHORT).show()
+      return
+    }
+
+    // 0번째 항목은 "전체 삭제", 나머지는 세션별 삭제.
+    val labels = arrayOf(getString(R.string.option_delete_all, timestamps.size)) +
+      timestamps.map { formatSessionLabel(it) }.toTypedArray()
+
+    AlertDialog.Builder(this)
+      .setTitle(R.string.title_select_session_delete)
+      .setItems(labels) { _, which ->
+        if (which == 0) confirmDeleteAllSessions(timestamps.size) else confirmDeleteSession(timestamps[which - 1])
+      }
+      .show()
+  }
+
+  private fun confirmDeleteSession(timestamp: String) {
+    AlertDialog.Builder(this)
+      .setTitle(R.string.title_delete_confirm)
+      .setMessage(R.string.msg_delete_one_confirm)
+      .setPositiveButton(R.string.btn_delete_confirm) { _, _ -> deleteSession(timestamp) }
+      .setNegativeButton(android.R.string.cancel, null)
+      .show()
+  }
+
+  private fun confirmDeleteAllSessions(count: Int) {
+    AlertDialog.Builder(this)
+      .setTitle(R.string.title_delete_confirm)
+      .setMessage(getString(R.string.msg_delete_all_confirm, count))
+      .setPositiveButton(R.string.btn_delete_confirm) { _, _ -> deleteAllSessions() }
+      .setNegativeButton(android.R.string.cancel, null)
+      .show()
+  }
+
+  private fun deleteSession(timestamp: String) {
+    File(File(filesDir, "logs"), "pedal_${timestamp}.csv").delete()
+    Toast.makeText(this, R.string.msg_delete_done, Toast.LENGTH_SHORT).show()
+  }
+
+  private fun deleteAllSessions() {
+    val logsDir = File(filesDir, "logs")
+    for (ts in listSessionTimestamps()) {
+      File(logsDir, "pedal_${ts}.csv").delete()
+    }
+    Toast.makeText(this, R.string.msg_delete_done, Toast.LENGTH_SHORT).show()
+  }
 
   override fun onDestroy() {
     if (tts != null) {

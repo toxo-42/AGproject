@@ -3,7 +3,6 @@ package com.example.agproject
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.util.AttributeSet
@@ -13,15 +12,15 @@ import android.view.View
  * 페달 압력(accel/brake) 실시간 그래프.
  *
  * 외부 차트 라이브러리 없이 Canvas 로 직접 그린다. 필요한 게 라인 2개와
- * 임계선 2개뿐이라 의존성을 늘릴 이유가 없다.
+ * 임계선 1개뿐이라 의존성을 늘릴 이유가 없다.
  *
  * - Y축: 0.0 ~ 1.0 고정 (Q31 정규화 압력이라 범위가 이미 확정)
  * - X축: 최근 [CAPACITY] 샘플. 새 샘플이 오른쪽에서 들어와 왼쪽으로 흐른다.
  * - 붉은 실선  = accel_high (이 위로 올라가면 '엑셀 깊게 밟음')
- * - 붉은 점선  = brake_low  (이 아래면 '브레이크 거의 안 밟음')
  *
- * 오조작 판정은 '엑셀이 붉은 실선 위 && 브레이크가 붉은 점선 아래'가
- * 윈도우에서 일정 비율 이상일 때다. 그래서 두 선을 같은 붉은색으로 묶었다.
+ * 급발진 방지가 목적이라 accel 임계값만 화면에 표시한다(2026-07-14, 사용자 결정).
+ * judge() 내부적으로는 brake_low 도 여전히 misop 판정 조건에 쓰이지만(엑셀 깊게 +
+ * 브레이크 거의 안 밟음), 그래프에는 accel 임계선만 그린다.
  */
 class PedalGraphView @JvmOverloads constructor(
   context: Context,
@@ -62,12 +61,6 @@ class PedalGraphView @JvmOverloads constructor(
     style = Paint.Style.STROKE
     strokeWidth = 2f
   }
-  private val brakeLowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = Color.parseColor("#FF5252")
-    style = Paint.Style.STROKE
-    strokeWidth = 2f
-    pathEffect = DashPathEffect(floatArrayOf(12f, 10f), 0f)
-  }
   private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.parseColor("#2A3540")
     style = Paint.Style.STROKE
@@ -87,6 +80,10 @@ class PedalGraphView @JvmOverloads constructor(
     this.brakeLow = brakeLow.toFloat()
     invalidate()
   }
+
+  /** 지금 그래프에 그려지고 있는 accel 임계값(캘리브레이션 전이면 기본값). 상단 텍스트 표시용.
+   *  급발진 방지가 목적이라 accel 임계값만 의미 있고 brake는 표시하지 않는다. */
+  fun getAccelHigh(): Double = accelHigh.toDouble()
 
   /** BLE 배치 하나(보통 4샘플)를 밀어 넣는다. 메인 스레드에서 호출할 것. */
   fun pushBatch(accels: FloatArray, brakes: FloatArray) {
@@ -126,8 +123,8 @@ class PedalGraphView @JvmOverloads constructor(
     }
 
     // 임계선 — 그래프 위에 얹혀야 하므로 파형보다 먼저 그린다.
+    // accel 임계값만 표시(급발진 방지가 목적이라 brake 임계선은 안 그림).
     canvas.drawLine(0f, toY(accelHigh, h), w, toY(accelHigh, h), accelHighPaint)
-    canvas.drawLine(0f, toY(brakeLow, h), w, toY(brakeLow, h), brakeLowPaint)
 
     if (size < 2) return
 

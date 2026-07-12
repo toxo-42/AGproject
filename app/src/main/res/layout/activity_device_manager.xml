@@ -26,6 +26,30 @@
         android:layout_weight="1"
         android:layout_height="wrap_content"/>
 
+    <!-- 로깅 데이터 추출(Phase E) — filesDir/logs 의 원시/이벤트 CSV를 시스템 공유 시트로 내보낸다 -->
+    <ImageButton
+        android:id="@+id/btnExportLogs"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:src="@android:drawable/ic_menu_save"
+        app:tint="@color/text_white"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:scaleType="fitCenter"
+        android:padding="8dp"
+        android:contentDescription="@string/desc_export_logs" />
+
+    <!-- 주행 기록 삭제 — 계속 쌓이기만 하는 filesDir/logs를 앱 안에서 정리할 수 있게 -->
+    <ImageButton
+        android:id="@+id/btnDeleteLogs"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:src="@android:drawable/ic_menu_delete"
+        app:tint="@color/red_error"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:scaleType="fitCenter"
+        android:padding="8dp"
+        android:contentDescription="@string/desc_delete_logs" />
+
     <ImageButton
         android:id="@+id/btnOpenSettings"
         android:layout_width="48dp"
