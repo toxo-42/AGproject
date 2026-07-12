@@ -49,22 +49,22 @@ class PedalGraphView @JvmOverloads constructor(
   private val accelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.parseColor("#00E676")   // accent_blue (실제로는 민트)
     style = Paint.Style.STROKE
-    strokeWidth = 3f
+    strokeWidth = 5f
   }
   private val brakePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.parseColor("#40C4FF")
     style = Paint.Style.STROKE
-    strokeWidth = 3f
+    strokeWidth = 5f
   }
   private val accelHighPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.parseColor("#FF5252")
     style = Paint.Style.STROKE
-    strokeWidth = 2f
+    strokeWidth = 7f
   }
   private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.parseColor("#2A3540")
     style = Paint.Style.STROKE
-    strokeWidth = 1f
+    strokeWidth = 7f
   }
   private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.parseColor("#546E7A")
