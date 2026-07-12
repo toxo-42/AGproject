@@ -82,6 +82,7 @@ class MainActivity : AppCompatActivity() {
     // 앱 켜자마자 권한 확인
     checkPermissions()
     checkOverlayPermission()
+    checkFullScreenIntentPermission()
 
     // '기기 검색' 버튼 클릭 -> ScanActivity 이동
     btnGoScan.setOnClickListener {
@@ -308,6 +309,22 @@ class MainActivity : AppCompatActivity() {
           android.net.Uri.parse("package:$packageName")
         )
         startActivityForResult(intent, 1234)
+      }
+    }
+  }
+
+  // 👇 [추가] 풀스크린 인텐트 권한 요청 (Android 14+ 부터는 매니페스트 선언만으로 자동 허용 안 됨.
+  //           허용 안 돼 있으면 CriticalActivity가 실행되지 않고 일반 알림으로만 뜬다.)
+  private fun checkFullScreenIntentPermission() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+      val manager = getSystemService(android.app.NotificationManager::class.java)
+      if (!manager.canUseFullScreenIntent()) {
+        Toast.makeText(this, "비상 시 경고 화면을 강제로 띄우려면 '전체 화면 알림' 권한이 필요합니다.", Toast.LENGTH_LONG).show()
+        val intent = Intent(
+          android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+          android.net.Uri.parse("package:$packageName")
+        )
+        startActivity(intent)
       }
     }
   }

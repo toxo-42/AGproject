@@ -583,6 +583,13 @@ class BleService : Service() {
     playVoiceFile("PEDAL")
     updateNotification("주의: 페달 오조작 감지")
     showCriticalNotification("위험! 페달 오조작!", "즉시 브레이크를 확인하세요!")
+
+    // fullScreenIntent는 화면이 꺼져있거나 잠겨있을 때만 자동 실행되고,
+    // 화면을 보고 있는 상태(포그라운드)에서는 배너 알림으로만 뜬다.
+    // 오조작은 화면을 보고 있는 상태에서도 무조건 전환돼야 하므로 직접 실행도 병행한다.
+    val forceIntent = Intent(this, CriticalActivity::class.java)
+    forceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    startActivity(forceIntent)
   }
 
   private fun playVoiceFile(type: String) {
