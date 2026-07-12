@@ -1,32 +1,3 @@
-"""증거자료 CSV 무결성 검증 스크립트 (PC 전용, 앱에 이식되지 않음).
-
-PeOb 앱이 내보내는 zip에는 4개 파일이 들어있다:
-    pedal_<타임스탬프>.csv       평문 원시 로그
-    pedal_<타임스탬프>.csv.sig   위 CSV에 대한 서명(base64, DER, ECDSA-SHA256/P-256)
-    pubkey.pem                   서명 검증용 공개키(폰의 Android Keystore 인증서에서 추출)
-    verify_signature.py          바로 이 스크립트(자기 자신도 zip에 동봉됨)
-
-서명은 폰의 하드웨어 보안 저장소(Android Keystore)에만 있는 개인키로 만들어졌고,
-그 개인키는 추출이 불가능하다. 그래서 이 스크립트로 검증했을 때 VALID가 나오면
-"이 CSV는 서명 당시 그 폰에서 나왔고, 이후 1바이트도 바뀌지 않았다"는 게 보장된다.
-
-⚠️ CSV 파일 자체는 평문이라 내용은 누구나 열람 가능하다(기밀성 없음 — 애초에
-   목적이 그게 아니라 무결성·진정성이다. §진행상황_및_로드맵.md Phase E 참고).
-
-⚠️ **외부 패키지 의존성 없음 — Python 3 표준 라이브러리(hashlib/base64)만 사용한다.**
-   처음엔 `cryptography` 패키지로 만들었는데, 검증은 이 저장소도 uv도 없는 제3자
-   (경찰/보험사) 컴퓨터에서 하는 거라 "pip install"조차 걸림돌이 될 수 있다는 피드백으로
-   ECDSA(P-256) 서명 검증을 직접 구현했다(2026-07-14). 그래서 이 파일 하나만 있으면
-   `python3 verify_signature.py <csv>` 로 바로 실행된다 — 설치할 것도, 인터넷도 필요 없다.
-
-사용법 (제3자 검증, zip을 그대로 압축 해제한 폴더에서):
-    python3 verify_signature.py pedal_20260714_032827.csv
-    (같은 폴더의 pedal_20260714_032827.csv.sig 와 pubkey.pem 을 자동으로 찾는다)
-
-    파일명이 다르면 직접 지정:
-    python3 verify_signature.py my.csv --sig my.csv.sig --pubkey pubkey.pem
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -43,7 +14,9 @@ _GX = 0x6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296
 _GY = 0x4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5
 
 
-def _point_add(p1: tuple[int, int] | None, p2: tuple[int, int] | None) -> tuple[int, int] | None:
+def _point_add(
+    p1: tuple[int, int] | None, p2: tuple[int, int] | None
+) -> tuple[int, int] | None:
     """P-256 위의 점 덧셈(같은 점이면 자동으로 배가 공식 사용). None = 무한원점."""
     if p1 is None:
         return p2
@@ -85,16 +58,18 @@ def _der_read_tlv(data: bytes, idx: int) -> tuple[int, bytes, int]:
         length = first_len
     else:
         n = first_len & 0x7F
-        length = int.from_bytes(data[idx:idx + n], "big")
+        length = int.from_bytes(data[idx : idx + n], "big")
         idx += n
-    value = data[idx:idx + length]
+    value = data[idx : idx + length]
     idx += length
     return tag, value, idx
 
 
 def _parse_ec_public_key_pem(pem_text: str) -> tuple[int, int]:
     """X.509 SubjectPublicKeyInfo PEM -> (x, y) 좌표. secp256r1 EC 키 전용."""
-    lines = [ln.strip() for ln in pem_text.splitlines() if ln.strip() and "-----" not in ln]
+    lines = [
+        ln.strip() for ln in pem_text.splitlines() if ln.strip() and "-----" not in ln
+    ]
     der = base64.b64decode("".join(lines))
 
     tag, seq_value, _ = _der_read_tlv(der, 0)
@@ -102,7 +77,7 @@ def _parse_ec_public_key_pem(pem_text: str) -> tuple[int, int]:
         raise ValueError("공개키 형식이 예상과 다릅니다(SEQUENCE 아님)")
 
     # SEQUENCE { algorithm SEQUENCE, subjectPublicKey BIT STRING }
-    _, _, idx = _der_read_tlv(seq_value, 0)          # algorithm identifier — 내용은 안 봄
+    _, _, idx = _der_read_tlv(seq_value, 0)  # algorithm identifier — 내용은 안 봄
     tag2, bit_string, _ = _der_read_tlv(seq_value, idx)
     if tag2 != 0x03:
         raise ValueError("공개키 형식이 예상과 다릅니다(BIT STRING 아님)")
@@ -150,10 +125,19 @@ def verify(csv_path: Path, sig_path: Path, pubkey_path: Path) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("csv", type=Path, help="검증할 CSV 파일")
-    parser.add_argument("--sig", type=Path, default=None, help="서명 파일(기본값: <csv>.sig)")
-    parser.add_argument("--pubkey", type=Path, default=None, help="공개키 파일(기본값: 같은 폴더의 pubkey.pem)")
+    parser.add_argument(
+        "--sig", type=Path, default=None, help="서명 파일(기본값: <csv>.sig)"
+    )
+    parser.add_argument(
+        "--pubkey",
+        type=Path,
+        default=None,
+        help="공개키 파일(기본값: 같은 폴더의 pubkey.pem)",
+    )
     args = parser.parse_args()
 
     csv_path: Path = args.csv
@@ -175,7 +159,9 @@ def main() -> None:
         print(f"✅ VALID — {csv_path.name} 은(는) 서명 이후 변조되지 않았습니다.")
         sys.exit(0)
     else:
-        print(f"🚨 INVALID — {csv_path.name} 이(가) 변조됐거나, 서명/공개키가 맞지 않습니다.")
+        print(
+            f"❌ INVALID — {csv_path.name} 이(가) 변조됐거나, 서명/공개키가 맞지 않습니다."
+        )
         sys.exit(1)
 
 
