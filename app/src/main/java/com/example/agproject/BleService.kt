@@ -577,13 +577,12 @@ class BleService : Service() {
     }
   }
 
-  // 페달 오조작 감지 시 경고 트리거 (기존 음성/헤드업 알림 재사용)
+  // 페달 오조작 감지 시 경고 트리거 (fullScreenIntent로 CriticalActivity 강제 실행)
   private fun onPedalMisoperation() {
     Log.w(tag, "[경고] 페달 오조작 감지")
-    playVoiceFile("SD")
+    playVoiceFile("PEDAL")
     updateNotification("주의: 페달 오조작 감지")
-    showHeadsUpNotification("페달 오조작", "브레이크를 확인하세요!")
-    sendBroadcastToActivity("ACTION_PEDAL_MISOP")
+    showCriticalNotification("위험! 페달 오조작!", "즉시 브레이크를 확인하세요!")
   }
 
   private fun playVoiceFile(type: String) {
@@ -597,6 +596,7 @@ class BleService : Service() {
     if (gender == "male") {
       // 남성일 때 파일 매칭
       soundResId = when(type) {
+        "PEDAL" -> R.raw.voice_pedal_male
         "SD" -> R.raw.voice_sd_male
         "ERROR" -> R.raw.voice_error_male
         else -> 0
@@ -604,6 +604,7 @@ class BleService : Service() {
     } else {
       // 여성일 때 파일 매칭
       soundResId = when(type) {
+        "PEDAL" -> R.raw.voice_pedal_female
         "SD" -> R.raw.voice_sd_female
         "ERROR" -> R.raw.voice_error_female
         else -> 0
@@ -755,6 +756,33 @@ class BleService : Service() {
 
     // 중요: ID를 1번(서비스용)과 다르게 999번(경고용)으로 줍니다.
     manager.notify(999, notification)
+  }
+
+  // CriticalActivity를 깨우는 비상 알림 함수 (fullScreenIntent로 강제 전체화면 전환)
+  private fun showCriticalNotification(title: String, content: String) {
+    val manager = getSystemService(NotificationManager::class.java)
+
+    val fullScreenIntent = Intent(this, CriticalActivity::class.java)
+    fullScreenIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+
+    val fullScreenPendingIntent = PendingIntent.getActivity(
+      this,
+      999,
+      fullScreenIntent,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    val builder = NotificationCompat.Builder(this, channelId)
+      .setSmallIcon(android.R.drawable.stat_sys_warning)
+      .setContentTitle(title)
+      .setContentText(content)
+      .setPriority(NotificationCompat.PRIORITY_HIGH)
+      .setCategory(NotificationCompat.CATEGORY_ALARM)
+      .setFullScreenIntent(fullScreenPendingIntent, true)
+      .setAutoCancel(true)
+      .build()
+
+    manager.notify(888, builder)
   }
 
   private fun getPendingIntent(): PendingIntent? {

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1A0000"
+    android:keepScreenOn="true">
+  <View
+      android:layout_width="match_parent"
+      android:layout_height="match_parent"
+      android:background="@color/bg_dark" />
+
+  <ImageView
+      android:id="@+id/ivCriticalIcon"
+      android:layout_width="508dp"
+      android:layout_height="372dp"
+      android:src="@drawable/warning_red_blink"
+      app:layout_constraintBottom_toTopOf="@+id/tvWarningTitle"
+      app:layout_constraintEnd_toEndOf="parent"
+      app:layout_constraintStart_toStartOf="parent"
+      app:layout_constraintTop_toTopOf="parent"
+      app:layout_constraintVertical_chainStyle="packed" app:layout_constraintHorizontal_bias="0.496"/>
+  <TextView
+      android:id="@+id/tvWarningTitle"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="20dp"
+      android:gravity="center"
+      android:text=" WARNING "
+      android:textColor="#FF0000"
+      android:textSize="70sp"
+      android:textStyle="bold"
+      app:layout_constraintBottom_toTopOf="@+id/tvWarningSub"
+      app:layout_constraintEnd_toEndOf="parent"
+      app:layout_constraintStart_toStartOf="parent"
+      app:layout_constraintTop_toBottomOf="@id/ivCriticalIcon" />
+
+  <TextView
+      android:id="@+id/tvWarningSub"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="20dp"
+      android:text="⚠️ 페달 오조작 감지됨!! ⚠️\n즉시 브레이크를 밟으세요."
+      android:textColor="#FFFFFF"
+      android:textSize="30sp"
+      android:textStyle="bold"
+      android:gravity="center"
+      app:layout_constraintBottom_toTopOf="@+id/btnDismiss"
+      app:layout_constraintEnd_toEndOf="parent"
+      app:layout_constraintStart_toStartOf="parent"
+      app:layout_constraintTop_toBottomOf="@id/tvWarningTitle" />
+
+  <com.google.android.material.button.MaterialButton
+      android:id="@+id/btnDismiss"
+      android:layout_width="0dp"
+      android:layout_height="80dp"
+      android:layout_marginHorizontal="20dp"
+      android:layout_marginTop="50dp"
+      android:layout_marginBottom="50dp"
+      android:backgroundTint="#D32F2F"
+      android:text="상황 확인 / 경고 해제"
+      android:textColor="#FFFFFF"
+      android:textSize="22sp"
+      android:textStyle="bold"
+      app:cornerRadius="16dp"
+      app:strokeColor="#FFFFFF"
+      app:strokeWidth="2dp"
+      app:layout_constraintBottom_toBottomOf="parent"
+      app:layout_constraintEnd_toEndOf="parent"
+      app:layout_constraintStart_toStartOf="parent"
+      app:layout_constraintTop_toBottomOf="@id/tvWarningSub" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
