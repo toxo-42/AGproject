@@ -74,11 +74,6 @@ class BleService : Service() {
   private var lastLoggedMisop: Boolean? = null
   private var lastTextMessage: String? = null
 
-  // 이번 세션의 운전 습관 프로필. 파일명에 남기고, judge_json 에도 그대로 넘긴다.
-  // 세션 도중 바뀌면 CSV 와 판정 기준이 어긋나므로 서비스 시작 시점에 한 번만 읽는다.
-  // onStartCommand(메인 스레드)가 쓰고 BLE 콜백 스레드가 읽는다.
-  @Volatile private var sessionProfile = DEFAULT_PROFILE
-
   // ── 연속형 개인화 캘리브레이션 상태 ──────────────────────────────
   // 계산된 임계값이 있으면(null 이 아니면) judgeWindow 가 profile 대신 이걸 쓴다.
   // 이전 세션에 캘리브레이션한 값이 있으면 연결 시점에 prefs 에서 복원해 재사용한다
@@ -123,17 +118,13 @@ class BleService : Service() {
     const val LABEL_NORMAL = 0   // 정상 주행 구간
     const val LABEL_MISOP = 1    // 오조작 재현 구간
 
-    // 프로필은 SharedPreferences("AgPrefs") 에 저장된다. judge.py 의 PROFILES 키와 반드시 일치.
-    const val PREF_PROFILE = "DRIVER_PROFILE"
-    const val DEFAULT_PROFILE = "normal"
-    val VALID_PROFILES = setOf("strong", "normal", "weak")
-
     // ── 연속형 개인화 캘리브레이션 (Phase B, calibration.py 대응) ──────────
-    // 3단계 프로필 대신, 캘리브레이션 세션(45초)에서 뽑은 accel_active_p90 + 오프셋으로
-    // 개인별 accel_high 를 직접 계산한다(§진행상황_및_로드맵.md 실험 근거). 계산된 임계값이
-    // 있으면 판정은 profile 기반 대신 이걸 우선 사용한다.
+    // 3단계 프로필(discrete) 방식은 실측에서 경계가 불안정해 폐기했다(§진행상황_및_로드맵.md
+    // Phase B). 캘리브레이션 세션에서 뽑은 accel_active_p90 + 오프셋으로 개인별 accel_high 를
+    // 직접 계산하는 이 방식만 쓴다. 캘리브레이션 전에는 판정 자체를 하지 않는다(judgeWindow 참고).
     const val ACTION_START_CALIBRATION = "ACTION_START_CALIBRATION"
     const val ACTION_CALIBRATION_DONE = "ACTION_CALIBRATION_DONE"
+    const val ACTION_CLEAR_CALIBRATION = "ACTION_CLEAR_CALIBRATION"
     const val EXTRA_THRESHOLDS_JSON = "THRESHOLDS_JSON"
     const val PREF_CALIBRATED_THRESHOLDS = "CALIBRATED_THRESHOLDS_JSON"
     const val CALIBRATION_DURATION_MS = 30_000L
@@ -195,10 +186,20 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
-    // 패턴 파악(연속형 캘리브레이션) 시작. 이미 감시 중인 세션에 바로 적용되며
-    // 재연결이 필요 없다 — sessionProfile 과 달리 캘리브레이션은 즉시 갱신되는 값이다.
+    // 패턴 파악(연속형 캘리브레이션) 시작. 이미 감시 중인 세션에 바로 적용되며 재연결이 필요 없다.
     if (intent?.action == ACTION_START_CALIBRATION) {
       startCalibration()
+      return START_NOT_STICKY
+    }
+
+    // 캘리브레이션 초기화 — 삭제 후 재설치한 것처럼 되돌린다. 다시 패턴 파악하기 전까지
+    // judgeWindow 가 판정을 건너뛰므로(calibratedThresholdsJson == null) 오조작 감지도 꺼진다.
+    if (intent?.action == ACTION_CLEAR_CALIBRATION) {
+      calibratedThresholdsJson = null
+      getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
+        .remove(PREF_CALIBRATED_THRESHOLDS)
+        .apply()
+      Log.i(tag, "캘리브레이션 초기화 — 판정 중단 상태로 복귀")
       return START_NOT_STICKY
     }
 
@@ -212,10 +213,6 @@ class BleService : Service() {
       stopSelf()
       return START_NOT_STICKY
     }
-
-    // 이번 세션에 적용할 프로필 확정. 이후 CSV 파일명·judge_json 판정에 모두 쓰인다.
-    sessionProfile = readProfile()
-    Log.i(tag, "세션 프로필: $sessionProfile")
 
     // 이전에 캘리브레이션해 둔 임계값이 있으면 복원 — 매 주행마다 다시 캘리브레이션할 필요 없다.
     calibratedThresholdsJson = readCalibratedThresholds()
@@ -435,24 +432,16 @@ class BleService : Service() {
     return try {
       val dir = java.io.File(filesDir, "logs").apply { if (!exists()) mkdirs() }
       val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-      // 파일명에 프로필을 박아 두면 나중에 adb pull 만으로 어느 프로필 세션인지 알 수 있다.
-      val file = java.io.File(dir, "pedal_${ts}_$sessionProfile.csv")
+      val file = java.io.File(dir, "pedal_${ts}.csv")
       java.io.BufferedWriter(java.io.FileWriter(file, true)).also {
         it.write("recv_epoch_ms,cnt,accel,brake,label\n")
         csvWriter = it
-        Log.i(tag, "RAW 로깅 시작: ${file.absolutePath} (프로필=$sessionProfile)")
+        Log.i(tag, "RAW 로깅 시작: ${file.absolutePath}")
       }
     } catch (e: Exception) {
       Log.e(tag, "CSV 로깅 파일 생성 실패: ${e.message}", e)
       null
     }
-  }
-
-  // 저장된 프로필을 읽되, 값이 깨졌거나 없으면 기본 프로필로 떨어진다.
-  // (judge.py 도 모르는 프로필명은 normal 로 fallback 하므로 양쪽이 일관)
-  private fun readProfile(): String {
-    val saved = getSharedPreferences("AgPrefs", MODE_PRIVATE).getString(PREF_PROFILE, null)
-    return if (saved in VALID_PROFILES) saved!! else DEFAULT_PROFILE
   }
 
   private fun readCalibratedThresholds(): String? =

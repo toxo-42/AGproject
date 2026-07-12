@@ -16,10 +16,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import com.chaquo.python.Python
-import com.chaquo.python.android.AndroidPlatform
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.button.MaterialButtonToggleGroup
 import org.json.JSONObject
 import java.io.BufferedOutputStream
 import java.io.File
@@ -43,17 +40,13 @@ class DataCollectActivity : AppCompatActivity() {
   private lateinit var graph: PedalGraphView
   private lateinit var tvLiveValues: TextView
   private lateinit var tvLabelIndicator: TextView
-  private lateinit var toggleProfile: MaterialButtonToggleGroup
   private lateinit var btnLabelMisop: MaterialButton
   private lateinit var btnExportCsv: ImageButton
   private lateinit var btnCalibrate: MaterialButton
+  private lateinit var btnResetCalibration: ImageButton
 
   private var isLabelingMisop = false
   private var calibrationTimer: CountDownTimer? = null
-
-  // 이미 적용된 프로필이면 Python 호출을 건너뛴다.
-  // (onCreate 에서 toggleProfile.check() 가 리스너를 먼저 깨워 중복 호출되는 것을 막음)
-  private var appliedProfile: String? = null
 
   // 화면 갱신은 BLE 배치(50Hz)마다 오지만, 숫자 텍스트까지 50Hz 로 바꾸면
   // 읽을 수가 없다. 그래프만 매번 갱신하고 텍스트는 100ms 마다.
@@ -92,20 +85,14 @@ class DataCollectActivity : AppCompatActivity() {
     graph = findViewById(R.id.graphPedal)
     tvLiveValues = findViewById(R.id.tvLiveValues)
     tvLabelIndicator = findViewById(R.id.tvLabelIndicator)
-    toggleProfile = findViewById(R.id.toggleProfile)
     btnLabelMisop = findViewById(R.id.btnLabelMisop)
     btnExportCsv = findViewById(R.id.btnExportCsv)
     btnCalibrate = findViewById(R.id.btnCalibrate)
+    btnResetCalibration = findViewById(R.id.btnResetCalibration)
 
     btnExportCsv.setOnClickListener { exportCsvLogs() }
     btnCalibrate.setOnClickListener { startCalibrationFlow() }
-
-    toggleProfile.addOnButtonCheckedListener { _, checkedId, isChecked ->
-      if (!isChecked) return@addOnButtonCheckedListener
-      val profile = profileOf(checkedId)
-      saveProfile(profile)
-      applyThresholds(profile)   // 프로필을 바꾸면 붉은 임계선도 즉시 따라 움직인다
-    }
+    btnResetCalibration.setOnClickListener { confirmResetCalibration() }
 
     btnLabelMisop.setOnClickListener {
       isLabelingMisop = !isLabelingMisop
@@ -113,9 +100,7 @@ class DataCollectActivity : AppCompatActivity() {
       updateLabelUI()
     }
 
-    val profile = loadProfile()
-    toggleProfile.check(buttonIdOf(profile))
-    applyThresholds(profile)
+    showExistingCalibration()   // 이미 캘리브레이션돼 있으면 그 값을 그래프에 바로 반영
     updateLabelUI()
   }
 
@@ -150,52 +135,6 @@ class DataCollectActivity : AppCompatActivity() {
     } catch (_: IllegalArgumentException) {
       // 이미 해제됨
     }
-  }
-
-  // --- 임계값: judge.py 를 단일 소스로 읽어온다 ---
-
-  private fun applyThresholds(profile: String) {
-    if (profile == appliedProfile) return
-    try {
-      if (!Python.isStarted()) Python.start(AndroidPlatform(this))
-      val json = Python.getInstance()
-        .getModule("judge")
-        .callAttr("thresholds_json", profile)
-        .toString()
-      val th = JSONObject(json)
-      graph.setThresholds(th.getDouble("accel_high"), th.getDouble("brake_low"))
-      appliedProfile = profile
-      Log.i(tag, "임계값 적용: profile=$profile $json")
-    } catch (e: Exception) {
-      // 실패해도 그래프 기본값(0.85/0.10)으로 계속 그린다.
-      Log.e(tag, "임계값 조회 실패: ${e.message}", e)
-    }
-  }
-
-  // --- 프로필 ---
-
-  private fun profileOf(checkedId: Int): String = when (checkedId) {
-    R.id.btnProfileStrong -> "strong"
-    R.id.btnProfileWeak -> "weak"
-    else -> "normal"
-  }
-
-  private fun buttonIdOf(profile: String): Int = when (profile) {
-    "strong" -> R.id.btnProfileStrong
-    "weak" -> R.id.btnProfileWeak
-    else -> R.id.btnProfileNormal
-  }
-
-  private fun saveProfile(profile: String) {
-    getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
-      .putString(BleService.PREF_PROFILE, profile).apply()
-    Log.i(tag, "프로필 저장: $profile")
-  }
-
-  private fun loadProfile(): String {
-    val saved = getSharedPreferences("AgPrefs", MODE_PRIVATE)
-      .getString(BleService.PREF_PROFILE, null)
-    return if (saved in BleService.VALID_PROFILES) saved!! else BleService.DEFAULT_PROFILE
   }
 
   // --- 서비스 통신 ---
@@ -242,17 +181,49 @@ class DataCollectActivity : AppCompatActivity() {
     calibrationTimer?.cancel()
     btnCalibrate.isEnabled = true
     btnCalibrate.setText(R.string.btn_calibrate)
-
+    applyThresholdsToGraph(thresholdsJson)
     try {
-      val th = JSONObject(thresholdsJson)
-      val accelHigh = th.getDouble("accel_high")
-      val brakeLow = th.getDouble("brake_low")
-      graph.setThresholds(accelHigh, brakeLow)
+      val accelHigh = JSONObject(thresholdsJson).getDouble("accel_high")
       Toast.makeText(this, getString(R.string.msg_calibration_done, accelHigh), Toast.LENGTH_LONG).show()
-      Log.i(tag, "캘리브레이션 적용: $thresholdsJson")
     } catch (e: Exception) {
       Log.e(tag, "캘리브레이션 결과 파싱 실패: ${e.message}", e)
     }
+  }
+
+  // 이미 캘리브레이션된 값이 있으면(다음 주행 재사용 케이스) 화면 진입 시 바로 그래프에 반영한다.
+  // 없으면 PedalGraphView 기본값(0.85/0.10)이 임시 참고선으로 남는다.
+  private fun showExistingCalibration() {
+    val json = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+      .getString(BleService.PREF_CALIBRATED_THRESHOLDS, null) ?: return
+    applyThresholdsToGraph(json)
+  }
+
+  private fun applyThresholdsToGraph(thresholdsJson: String) {
+    try {
+      val th = JSONObject(thresholdsJson)
+      graph.setThresholds(th.getDouble("accel_high"), th.getDouble("brake_low"))
+      Log.i(tag, "임계값 그래프 반영: $thresholdsJson")
+    } catch (e: Exception) {
+      Log.e(tag, "임계값 파싱 실패: ${e.message}", e)
+    }
+  }
+
+  // 초기화하면 오조작 감지가 다시 꺼지므로(캘리브레이션 전 = 판정 안 함) 확인을 받는다.
+  private fun confirmResetCalibration() {
+    androidx.appcompat.app.AlertDialog.Builder(this)
+      .setTitle(R.string.title_reset_calibration_confirm)
+      .setMessage(R.string.msg_reset_calibration_confirm)
+      .setPositiveButton(R.string.btn_reset_calibration_confirm) { _, _ -> resetCalibration() }
+      .setNegativeButton(android.R.string.cancel, null)
+      .show()
+  }
+
+  private fun resetCalibration() {
+    startService(Intent(this, BleService::class.java).apply {
+      action = BleService.ACTION_CLEAR_CALIBRATION
+    })
+    graph.setThresholds(PedalGraphView.DEFAULT_ACCEL_HIGH, PedalGraphView.DEFAULT_BRAKE_LOW)
+    Toast.makeText(this, R.string.msg_reset_calibration_done, Toast.LENGTH_SHORT).show()
   }
 
   // --- CSV 내보내기 (개발자용: 반복 학습 시 adb 없이 세션 CSV 전부를 한 번에 회수) ---

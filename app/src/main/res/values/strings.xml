@@ -31,13 +31,9 @@
   <string name="desc_back_button">뒤로 가기</string>
   <string name="desc_device_icon">기기 아이콘</string>
 
-  <!-- 데이터 수집(Phase A): 운전 습관 프로필 + 오조작 구간 라벨링 -->
+  <!-- 데이터 수집(Phase A): 캘리브레이션 + 오조작 구간 라벨링 -->
   <string name="title_data_collect">데이터 수집</string>
   <string name="btn_data_collect">데이터 수집 (Collect)</string>
-  <string name="label_profile">운전 습관 프로필</string>
-  <string name="profile_strong">강함</string>
-  <string name="profile_normal">보통</string>
-  <string name="profile_weak">약함</string>
   <string name="btn_label_misop">오조작 구간 기록</string>
   <string name="btn_label_misop_on">● 오조작 기록 중</string>
   <string name="label_indicator_off">○ 정상</string>
@@ -52,4 +48,14 @@
   <string name="btn_calibrate">패턴 파악 시작 </string>
   <string name="btn_calibrate_running">패턴 파악 중… %1$d초</string>
   <string name="msg_calibration_done">캘리브레이션 완료: 엑셀 임계값 %1$.2f 적용됨</string>
+  <string name="desc_reset_calibration">캘리브레이션 초기화</string>
+  <string name="title_reset_calibration_confirm">캘리브레이션을 초기화할까요?</string>
+  <string name="msg_reset_calibration_confirm">패턴 파악 데이터가 삭제되고, 다시 패턴 파악하기 전까지 오조작 감지가 꺼집니다.</string>
+  <string name="btn_reset_calibration_confirm">초기화</string>
+  <string name="msg_reset_calibration_done">캘리브레이션이 초기화됐습니다</string>
+
+  <!-- 캘리브레이션 온보딩: 연결 성공 시 아직 캘리브레이션 전이면 뜨는 팝업 -->
+  <string name="title_calibration_onboarding">패턴 파악이 필요합니다</string>
+  <string name="msg_calibration_onboarding">아직 이 기기에서 운전 습관을 파악한 적이 없습니다.\n페달 오조작 감지가 동작하려면 먼저 패턴 파악이 필요합니다.</string>
+  <string name="btn_calibration_onboarding_start">지금 패턴 파악하기</string>
 </resources>

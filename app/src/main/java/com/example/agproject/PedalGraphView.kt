@@ -32,6 +32,10 @@ class PedalGraphView @JvmOverloads constructor(
   companion object {
     // 200Hz × 5초 = 1000샘플. 페달을 한 번 밟고 떼는 동작이 화면에 딱 들어온다.
     const val CAPACITY = 1000
+
+    // 캘리브레이션 전/초기화 직후에 쓰는 임시 참고선(실제 판정 임계값이 아니라 눈대중 표시용).
+    const val DEFAULT_ACCEL_HIGH = 0.85
+    const val DEFAULT_BRAKE_LOW = 0.10
   }
 
   // 링 버퍼: head 가 다음에 덮어쓸 위치. size 가 CAPACITY 에 도달하면 계속 순환한다.
@@ -40,8 +44,8 @@ class PedalGraphView @JvmOverloads constructor(
   private var head = 0
   private var size = 0
 
-  private var accelHigh = 0.85f
-  private var brakeLow = 0.10f
+  private var accelHigh = DEFAULT_ACCEL_HIGH.toFloat()
+  private var brakeLow = DEFAULT_BRAKE_LOW.toFloat()
 
   private val accelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.parseColor("#00E676")   // accent_blue (실제로는 민트)

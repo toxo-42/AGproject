@@ -38,6 +38,9 @@ class MainActivity : AppCompatActivity() {
   // 0: 대기, 1: 정상, 2: 에러(UUID 다름)
   private var connectionStatus= 0
 
+  // 캘리브레이션 온보딩 팝업이 이미 떠 있는 동안 중복으로 안 뜨게 막는 플래그.
+  private var isCalibrationPopupShowing = false
+
   // Broadcast을 수신할 '라디오'생성
   private val statusReceiver = object : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
@@ -45,6 +48,7 @@ class MainActivity : AppCompatActivity() {
         "ACTION_UUID_MATCHED" -> {
           connectionStatus = 1 // 정상
           updateUI()
+          maybeShowCalibrationOnboarding()
         }
         "ACTION_UUID_MISMATCH" -> {
           connectionStatus = 2 // 에러 (빨간불)
@@ -272,6 +276,27 @@ class MainActivity : AppCompatActivity() {
       // 2. 팝업 닫기
       dialog.dismiss()
     }
+    dialog.show()
+  }
+
+  // 연결 성공 시, 아직 캘리브레이션한 적이 없으면 "패턴 파악" 화면으로 유도하는 팝업.
+  // 캘리브레이션 전엔 오조작 감지가 아예 동작하지 않으므로(BleService.judgeWindow 참고)
+  // 사용자가 이걸 모르고 지나치지 않게 강제로 안내한다.
+  private fun maybeShowCalibrationOnboarding() {
+    if (isCalibrationPopupShowing || isFinishing || isDestroyed) return
+    val calibrated = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+      .getString(BleService.PREF_CALIBRATED_THRESHOLDS, null)
+    if (calibrated != null) return
+
+    isCalibrationPopupShowing = true
+    val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+      .setTitle(R.string.title_calibration_onboarding)
+      .setMessage(R.string.msg_calibration_onboarding)
+      .setPositiveButton(R.string.btn_calibration_onboarding_start) { _, _ ->
+        startActivity(Intent(this, DataCollectActivity::class.java))
+      }
+      .setOnDismissListener { isCalibrationPopupShowing = false }
+      .create()
     dialog.show()
   }
 

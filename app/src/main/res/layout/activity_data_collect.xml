@@ -76,68 +76,13 @@
         android:text="@string/graph_legend"
         android:textColor="@color/text_hint"
         android:textSize="12sp"
-        app:layout_constraintBottom_toTopOf="@id/tvProfileLabel" />
+        app:layout_constraintBottom_toTopOf="@id/btnCalibrate" />
 
-    <TextView
-        android:id="@+id/tvProfileLabel"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:text="@string/label_profile"
-        android:textColor="@color/text_gray"
-        android:textSize="13sp"
-        android:textStyle="bold"
-        app:layout_constraintBottom_toTopOf="@id/toggleProfile"
-        app:layout_constraintStart_toStartOf="parent" />
-
-    <com.google.android.material.button.MaterialButtonToggleGroup
-        android:id="@+id/toggleProfile"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="14dp"
-        app:singleSelection="true"
-        app:selectionRequired="true"
-        app:layout_constraintBottom_toTopOf="@id/btnCalibrate"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnProfileStrong"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="44dp"
-            android:text="@string/profile_strong"
-            android:textColor="@color/text_white"
-            android:textSize="13sp"
-            app:strokeColor="@color/accent_blue" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnProfileNormal"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="44dp"
-            android:text="@string/profile_normal"
-            android:textColor="@color/text_white"
-            android:textSize="13sp"
-            app:strokeColor="@color/accent_blue" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnProfileWeak"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="44dp"
-            android:text="@string/profile_weak"
-            android:textColor="@color/text_white"
-            android:textSize="13sp"
-            app:strokeColor="@color/accent_blue" />
-
-    </com.google.android.material.button.MaterialButtonToggleGroup>
-
-    <!-- 연속형 개인화 캘리브레이션("패턴 파악") — 45초간 실주행 패턴을 모아 accel_high를 개인화 -->
+    <!-- 연속형 개인화 캘리브레이션("패턴 파악") — 캘리브레이션 시간 동안 실주행 패턴을 모아 accel_high를 개인화 -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnCalibrate"
         style="@style/Widget.MaterialComponents.Button"
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="52dp"
         android:layout_marginBottom="10dp"
         android:text="@string/btn_calibrate"
@@ -147,6 +92,22 @@
         app:cornerRadius="12dp"
         app:layout_constraintBottom_toTopOf="@id/btnLabelMisop"
         app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/btnResetCalibration"
+        app:layout_constraintHorizontal_chainStyle="packed" />
+
+    <!-- 캘리브레이션 초기화 — 삭제 후 재설치한 것처럼 되돌려 다시 패턴 파악하게 한다 -->
+    <ImageButton
+        android:id="@+id/btnResetCalibration"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:layout_marginStart="8dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@android:drawable/ic_menu_revert"
+        app:tint="@color/text_hint"
+        android:contentDescription="@string/desc_reset_calibration"
+        app:layout_constraintBottom_toBottomOf="@id/btnCalibrate"
+        app:layout_constraintTop_toTopOf="@id/btnCalibrate"
+        app:layout_constraintStart_toEndOf="@id/btnCalibrate"
         app:layout_constraintEnd_toEndOf="parent" />
 
     <com.google.android.material.button.MaterialButton
