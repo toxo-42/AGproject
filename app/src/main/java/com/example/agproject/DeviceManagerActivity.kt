@@ -50,6 +50,14 @@ class DeviceManagerActivity : AppCompatActivity() {
     btnDataCollect.setOnClickListener {
       startActivity(Intent(this, DataCollectActivity::class.java))
     }
+    // 길게 누르면 개발자 전용 오조작 라벨링 모드로 진입 (AI 학습 데이터 수집용, 일반 사용자에겐 숨김)
+    btnDataCollect.setOnLongClickListener {
+      startActivity(Intent(this, DataCollectActivity::class.java).apply {
+        putExtra(DataCollectActivity.EXTRA_DEV_MODE, true)
+      })
+      Toast.makeText(this, R.string.msg_dev_mode_entered, Toast.LENGTH_SHORT).show()
+      true
+    }
 
     // 3. 설정 버튼 연결
     val btnOpenSettings = findViewById<ImageButton>(R.id.btnOpenSettings)

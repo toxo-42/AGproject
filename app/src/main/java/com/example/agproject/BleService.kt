@@ -45,6 +45,14 @@ class BleService : Service() {
   private var lastMisopShown = false   // 같은 오조작 연속 트리거 방지(예시)
   private var lastCnt = -1             // 직전 샘플 cnt (누락 검출용, -1 = 아직 없음)
 
+  // 급발진은 순간 스파이크가 아니라 "꾹 밟고 유지"하는 패턴이라, 윈도우 1개(0.25초)만 보고
+  // 바로 경고하면 찰나의 오조작(밟았다 바로 뗌)까지 잡아버린다. 그래서 misop=true 가 여러
+  // 윈도우 연속으로 나와야 실제 경고를 띄운다(MISOP_SUSTAIN_WINDOWS, 2026-07-13 사용자 결정).
+  private var consecutiveMisopWindows = 0
+  // 지속 카운트 도중 아주 잠깐 misop=false 로 떨어져도(센서 노이즈 등) 카운트를 바로 리셋하지
+  // 않고 봐주는 여유 구간(MISOP_GAP_TOLERANCE_WINDOWS). 이 여유를 넘겨야 실제 회복으로 본다.
+  private var misopGapWindows = 0
+
   // ── RAW 원시 샘플 CSV 로깅 (Phase A/E: 학습 데이터 + 증거자료) ──────────
   // 첫 윈도우가 찰 때 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
   // 저장 위치: filesDir/logs/pedal_yyyyMMdd_HHmmss.csv (권한 불필요, adb pull 로 회수)
@@ -76,6 +84,10 @@ class BleService : Service() {
   // MainActivity 의 '오조작' 토글이 ACTION_SET_LABEL 로 갱신한다.
   // BLE 콜백 스레드가 읽고 UI 스레드가 쓰므로 @Volatile 필요.
   @Volatile private var currentLabel = LABEL_NORMAL
+
+  // 개발자 전용 스타일 라벨링(강/보통/약) — 오조작 라벨과 별개로, CSV 행마다 "지금 어떤
+  // 스타일로 밟는 중인가"를 남긴다. DataCollectActivity 의 개발자 모드에서만 노출된다.
+  @Volatile private var currentStyle = STYLE_UNSET
 
   // 수집 화면이 떠 있는 동안만 true. BLE 콜백 스레드가 읽고 메인 스레드가 쓴다.
   @Volatile private var liveStreamEnabled = false
@@ -126,6 +138,13 @@ class BleService : Service() {
     // STM32 200Hz 원천 스트림 기준. 50샘플 = 0.25초 윈도우 (튜닝 대상)
     private const val WINDOW_SIZE = 50
 
+    // ── 오조작 지속시간 판정 (2026-07-13 사용자 결정) ────────────────────
+    // 급발진 시나리오는 엑셀을 브레이크로 착각해 "꾹 밟고 유지"하는 패턴이라, 짧은 스파이크성
+    // 오조작(밟았다 바로 뗌)과 구분하려면 misop=true 가 일정 시간 이상 연속으로 나와야 한다.
+    // 값은 전부 실측 튜닝 전 임시값 — 실제로 밟아보면서 조정할 것.
+    private const val MISOP_SUSTAIN_WINDOWS = 8       // 8윈도우 = 2.0초 (WINDOW_SIZE 기준), 튜닝 대상
+    private const val MISOP_GAP_TOLERANCE_WINDOWS = 2  // 2윈도우 = 0.5초 까지는 끊김 허용, 튜닝 대상
+
     // 로그 스로틀 주기 (수신 요약 / 판정 하트비트)
     private const val RAW_LOG_INTERVAL_MS = 5_000L
     private const val JUDGE_LOG_INTERVAL_MS = 10_000L
@@ -137,6 +156,16 @@ class BleService : Service() {
 
     const val LABEL_NORMAL = 0   // 정상 주행 구간
     const val LABEL_MISOP = 1    // 오조작 재현 구간
+
+    // 개발자 전용 스타일 라벨링(강/보통/약) — 로지스틱 회귀 feature 비교용 원시 데이터에
+    // 태그를 남긴다. 실시간 판정(임계값)에는 전혀 영향을 주지 않는다(캘리브레이션과 무관).
+    const val ACTION_SET_STYLE = "ACTION_SET_STYLE"
+    const val EXTRA_STYLE = "STYLE"
+
+    const val STYLE_UNSET = "unset"
+    const val STYLE_STRONG = "strong"
+    const val STYLE_NORMAL = "normal"
+    const val STYLE_WEAK = "weak"
 
     // ── 연속형 개인화 캘리브레이션 (Phase B, calibration.py 대응) ──────────
     // 3단계 프로필(discrete) 방식은 실측에서 경계가 불안정해 폐기했다(§진행상황_및_로드맵.md
@@ -196,6 +225,13 @@ class BleService : Service() {
         LABEL_NORMAL
       }
       Log.i(tag, "라벨 변경: label=$currentLabel (${if (currentLabel == LABEL_MISOP) "오조작" else "정상"})")
+      return START_NOT_STICKY
+    }
+
+    // 개발자 전용 스타일 라벨 토글(강/보통/약). 이후 기록되는 CSV 행의 style 컬럼이 이 값으로 찍힌다.
+    if (intent?.action == ACTION_SET_STYLE) {
+      currentStyle = intent.getStringExtra(EXTRA_STYLE) ?: STYLE_UNSET
+      Log.i(tag, "스타일 변경: style=$currentStyle")
       return START_NOT_STICKY
     }
 
@@ -454,7 +490,7 @@ class BleService : Service() {
       val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
       val file = java.io.File(dir, "pedal_${ts}.csv")
       java.io.BufferedWriter(java.io.FileWriter(file, true)).also {
-        it.write("date,time,brake,accel,module_err,pedal_err,accel_exceed,label\n")
+        it.write("date,time,brake,accel,module_err,pedal_err,accel_exceed,label,style\n")
         csvWriter = it
         Log.i(tag, "RAW 로깅 시작: ${file.absolutePath}")
       }
@@ -540,7 +576,7 @@ class BleService : Service() {
         w.write(
           "${csvDateFormat.format(d)},${csvTimeFormat.format(d)}," +
             "${String.format(Locale.US, "%.4f", brake)},${String.format(Locale.US, "%.4f", accel)}," +
-            "$moduleErr,$pedalErr,${String.format(Locale.US, "%.4f", exceed)},$label\n"
+            "$moduleErr,$pedalErr,${String.format(Locale.US, "%.4f", exceed)},$label,$currentStyle\n"
         )
       } catch (e: Exception) {
         Log.e(tag, "CSV 쓰기 실패: ${e.message}")
@@ -695,11 +731,23 @@ class BleService : Service() {
         lastJudgeLogMs = nowMs
       }
 
-      if (misop && !lastMisopShown) {
+      // 지속시간 카운트: misop=true 가 여러 윈도우 연속으로 나와야 경고를 띄운다.
+      // 도중에 misop=false 가 잠깐(MISOP_GAP_TOLERANCE_WINDOWS 이내) 섞여도 카운트를
+      // 리셋하지 않고 봐준다 — 그 여유를 넘겨야 실제로 회복된 것으로 본다.
+      if (misop) {
+        consecutiveMisopWindows++
+        misopGapWindows = 0
+      } else {
+        misopGapWindows++
+        if (misopGapWindows > MISOP_GAP_TOLERANCE_WINDOWS) {
+          consecutiveMisopWindows = 0
+          lastMisopShown = false // 실제로 회복됐을 때만 다음 오조작을 다시 경고할 수 있게 재무장
+        }
+      }
+
+      if (consecutiveMisopWindows >= MISOP_SUSTAIN_WINDOWS && !lastMisopShown) {
         lastMisopShown = true
         onPedalMisoperation()
-      } else if (!misop) {
-        lastMisopShown = false // 정상으로 돌아오면 다음 오조작 다시 경고
       }
     } catch (e: Exception) {
       Log.e(tag, "judge 호출 실패: ${e.message}", e)

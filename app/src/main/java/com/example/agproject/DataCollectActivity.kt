@@ -33,8 +33,12 @@ class DataCollectActivity : AppCompatActivity() {
   private lateinit var tvLiveValues: TextView
   private lateinit var btnCalibrate: MaterialButton
   private lateinit var btnResetCalibration: ImageButton
+  private lateinit var btnLabelMisop: MaterialButton
+  private lateinit var rgStyle: android.widget.RadioGroup
 
   private var calibrationTimer: CountDownTimer? = null
+  private var devMode = false
+  private var labelingMisop = false
 
   // 화면 갱신은 BLE 배치(50Hz)마다 오지만, 숫자 텍스트까지 50Hz 로 바꾸면
   // 읽을 수가 없다. 그래프만 매번 갱신하고 텍스트는 100ms 마다.
@@ -78,9 +82,35 @@ class DataCollectActivity : AppCompatActivity() {
     tvLiveValues = findViewById(R.id.tvLiveValues)
     btnCalibrate = findViewById(R.id.btnCalibrate)
     btnResetCalibration = findViewById(R.id.btnResetCalibration)
+    btnLabelMisop = findViewById(R.id.btnLabelMisop)
+    rgStyle = findViewById(R.id.rgStyle)
 
     btnCalibrate.setOnClickListener { startCalibrationFlow() }
     btnResetCalibration.setOnClickListener { confirmResetCalibration() }
+
+    devMode = intent.getBooleanExtra(EXTRA_DEV_MODE, false)
+    if (devMode) {
+      // dev mode 에서는 "패턴 파악"(연속형 캘리브레이션) 대신 강/보통/약 스타일 라벨링을 쓴다.
+      // INVISIBLE 로 숨겨 tvLegend 등 나머지 레이아웃 제약이 흔들리지 않게 한다(공간은 유지).
+      btnCalibrate.visibility = android.view.View.INVISIBLE
+      btnCalibrate.isEnabled = false
+      btnResetCalibration.visibility = android.view.View.INVISIBLE
+      btnResetCalibration.isEnabled = false
+
+      btnLabelMisop.visibility = android.view.View.VISIBLE
+      btnLabelMisop.setOnClickListener { toggleMisopLabel() }
+
+      rgStyle.visibility = android.view.View.VISIBLE
+      rgStyle.setOnCheckedChangeListener { _, checkedId ->
+        val style = when (checkedId) {
+          R.id.rbStyleStrong -> BleService.STYLE_STRONG
+          R.id.rbStyleNormal -> BleService.STYLE_NORMAL
+          R.id.rbStyleWeak -> BleService.STYLE_WEAK
+          else -> BleService.STYLE_UNSET
+        }
+        setStyleLabel(style)
+      }
+    }
 
     showExistingCalibration()   // 이미 캘리브레이션돼 있으면 그 값을 그래프에 바로 반영
   }
@@ -103,6 +133,11 @@ class DataCollectActivity : AppCompatActivity() {
     super.onPause()
     // 화면을 벗어나면 50Hz 브로드캐스트를 끈다.
     setLiveStream(false)
+    // 라벨링 중이었다면 다음 세션에 새지 않도록 정상/미설정으로 되돌린다.
+    if (devMode) {
+      if (labelingMisop) setMisopLabel(false)
+      setStyleLabel(BleService.STYLE_UNSET)
+    }
     // 캘리브레이션 자체는 BleService 안에서 화면과 무관하게 계속 진행된다 —
     // 여기서 취소하는 건 화면에 남은 카운트다운 UI뿐.
     calibrationTimer?.cancel()
@@ -119,6 +154,38 @@ class DataCollectActivity : AppCompatActivity() {
     startService(Intent(this, BleService::class.java).apply {
       action = BleService.ACTION_SET_LIVE_STREAM
       putExtra(BleService.EXTRA_LIVE_STREAM, enabled)
+    })
+  }
+
+  // --- 개발자 전용 오조작 라벨링 (AI 학습 데이터 수집) ---
+
+  private fun toggleMisopLabel() {
+    setMisopLabel(!labelingMisop)
+  }
+
+  private fun setMisopLabel(misop: Boolean) {
+    labelingMisop = misop
+    startService(Intent(this, BleService::class.java).apply {
+      action = BleService.ACTION_SET_LABEL
+      putExtra(BleService.EXTRA_LABEL, if (misop) BleService.LABEL_MISOP else BleService.LABEL_NORMAL)
+    })
+    if (misop) {
+      btnLabelMisop.setText(R.string.btn_label_misop)
+      btnLabelMisop.backgroundTintList = android.content.res.ColorStateList.valueOf(
+        androidx.core.content.ContextCompat.getColor(this, R.color.red_error)
+      )
+    } else {
+      btnLabelMisop.setText(R.string.btn_label_normal)
+      btnLabelMisop.backgroundTintList = android.content.res.ColorStateList.valueOf(
+        androidx.core.content.ContextCompat.getColor(this, R.color.text_hint)
+      )
+    }
+  }
+
+  private fun setStyleLabel(style: String) {
+    startService(Intent(this, BleService::class.java).apply {
+      action = BleService.ACTION_SET_STYLE
+      putExtra(BleService.EXTRA_STYLE, style)
     })
   }
 
@@ -195,4 +262,8 @@ class DataCollectActivity : AppCompatActivity() {
     Toast.makeText(this, R.string.msg_reset_calibration_done, Toast.LENGTH_SHORT).show()
   }
 
+  companion object {
+    // 데이터 수집 버튼을 길게 눌렀을 때만 true — 오조작 라벨링 UI 노출 여부를 결정한다.
+    const val EXTRA_DEV_MODE = "EXTRA_DEV_MODE"
+  }
 }

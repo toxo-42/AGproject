@@ -44,9 +44,26 @@
             android:layout_marginTop="10dp"
             android:background="@color/bg_dark"
             app:layout_constraintTop_toBottomOf="@id/tvLiveValues"
-            app:layout_constraintBottom_toTopOf="@id/tvLegend"
+            app:layout_constraintBottom_toTopOf="@id/btnLabelMisop"
             tools:layout_editor_absoluteX="16dp"
             app:layout_constraintVertical_bias="0.0" />
+
+    <!-- 개발자 전용 오조작 라벨링 (AI 학습 데이터 수집) — 일반 진입 시 숨김, dev mode 에서만 표시 -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnLabelMisop"
+        style="@style/Widget.MaterialComponents.Button"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginBottom="8dp"
+        android:text="@string/btn_label_normal"
+        android:textColor="@color/text_white"
+        android:textSize="15sp"
+        android:visibility="gone"
+        app:backgroundTint="@color/text_hint"
+        app:cornerRadius="12dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/tvLegend" />
 
     <!-- 연속형 개인화 캘리브레이션("패턴 파악") — 캘리브레이션 시간 동안 실주행 패턴을 모아 accel_high를 개인화 -->
     <TextView
@@ -59,6 +76,45 @@
             android:textSize="17sp"
             app:layout_constraintBottom_toTopOf="@id/btnCalibrate"
             tools:layout_editor_absoluteX="20dp" />
+
+    <!-- 개발자 전용 스타일 라벨링(강/보통/약) — 오조작 라벨과 별개로 CSV에 스타일 태그를 남긴다.
+         일반 진입 시 숨김, dev mode 에서만 표시(그 대신 "패턴 파악" 버튼은 dev mode 에서 숨김). -->
+    <RadioGroup
+        android:id="@+id/rgStyle"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/btnCalibrate"
+        app:layout_constraintBottom_toBottomOf="@id/btnCalibrate"
+        app:layout_constraintStart_toStartOf="@id/btnCalibrate"
+        app:layout_constraintEnd_toEndOf="@id/btnResetCalibration">
+
+        <RadioButton
+            android:id="@+id/rbStyleStrong"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="@string/style_strong"
+            android:textColor="@color/text_white" />
+
+        <RadioButton
+            android:id="@+id/rbStyleNormal"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="@string/style_normal"
+            android:textColor="@color/text_white" />
+
+        <RadioButton
+            android:id="@+id/rbStyleWeak"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="@string/style_weak"
+            android:textColor="@color/text_white" />
+
+    </RadioGroup>
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnCalibrate"
