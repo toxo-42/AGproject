@@ -2,23 +2,27 @@
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
+        xmlns:tools="http://schemas.android.com/tools"
+        android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_dark"
     android:padding="20dp">
 
-    <TextView
-        android:id="@+id/tvCollectTitle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/title_data_collect"
-        android:textColor="@color/accent_blue"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
-
     <!-- 현재 압력값 (숫자) -->
+
+    <TextView
+            android:id="@+id/tvCollectTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/title_data_collect"
+            android:textColor="@color/accent_blue"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            android:layout_marginTop="16dp"
+            android:layout_marginStart="8dp" />
+
     <TextView
         android:id="@+id/tvLiveValues"
         android:layout_width="match_parent"
@@ -32,26 +36,30 @@
         app:layout_constraintStart_toStartOf="parent" />
 
     <!-- 실시간 그래프 (accel/brake + 임계선) -->
-    <com.example.agproject.PedalGraphView
-        android:id="@+id/graphPedal"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="12dp"
-        android:background="@color/bg_card"
-        app:layout_constraintTop_toBottomOf="@id/tvLiveValues"
-        app:layout_constraintBottom_toTopOf="@id/tvLegend" />
 
-    <TextView
-        android:id="@+id/tvLegend"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:text="@string/graph_legend"
-        android:textColor="@color/text_hint"
-        android:textSize="17sp"
-        app:layout_constraintBottom_toTopOf="@id/btnCalibrate" />
+    <com.example.agproject.PedalGraphView
+            android:id="@+id/graphPedal"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="10dp"
+            android:background="@color/bg_dark"
+            app:layout_constraintTop_toBottomOf="@id/tvLiveValues"
+            app:layout_constraintBottom_toTopOf="@id/tvLegend"
+            tools:layout_editor_absoluteX="16dp"
+            app:layout_constraintVertical_bias="0.0" />
 
     <!-- 연속형 개인화 캘리브레이션("패턴 파악") — 캘리브레이션 시간 동안 실주행 패턴을 모아 accel_high를 개인화 -->
+    <TextView
+            android:id="@+id/tvLegend"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:text="@string/graph_legend"
+            android:textColor="@color/text_hint"
+            android:textSize="17sp"
+            app:layout_constraintBottom_toTopOf="@id/btnCalibrate"
+            tools:layout_editor_absoluteX="20dp" />
+
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnCalibrate"
         style="@style/Widget.MaterialComponents.Button"
