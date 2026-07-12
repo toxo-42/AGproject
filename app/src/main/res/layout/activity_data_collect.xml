@@ -18,39 +18,12 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
 
-    <!-- CSV 로그 내보내기(개발자용 반복 학습 편의 — filesDir/logs 전체를 zip으로 공유 시트에) -->
-    <ImageButton
-        android:id="@+id/btnExportCsv"
-        android:layout_width="32dp"
-        android:layout_height="32dp"
-        android:layout_marginStart="8dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:src="@android:drawable/ic_menu_save"
-        app:tint="@color/accent_blue"
-        android:contentDescription="@string/desc_export_csv"
-        app:layout_constraintStart_toEndOf="@id/tvCollectTitle"
-        app:layout_constraintTop_toTopOf="@id/tvCollectTitle"
-        app:layout_constraintBottom_toBottomOf="@id/tvCollectTitle" />
-
-    <!-- 라벨링 표시등: label=1 인 동안 붉게 켜진다 -->
-    <TextView
-        android:id="@+id/tvLabelIndicator"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/label_indicator_off"
-        android:textColor="@color/text_hint"
-        android:textSize="14sp"
-        android:textStyle="bold"
-        app:layout_constraintTop_toTopOf="@id/tvCollectTitle"
-        app:layout_constraintBottom_toBottomOf="@id/tvCollectTitle"
-        app:layout_constraintEnd_toEndOf="parent" />
-
     <!-- 현재 압력값 (숫자) -->
     <TextView
         android:id="@+id/tvLiveValues"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="14dp"
         android:text="@string/live_values_idle"
         android:textColor="@color/text_gray"
         android:textSize="15sp"
@@ -75,7 +48,7 @@
         android:layout_marginBottom="16dp"
         android:text="@string/graph_legend"
         android:textColor="@color/text_hint"
-        android:textSize="12sp"
+        android:textSize="17sp"
         app:layout_constraintBottom_toTopOf="@id/btnCalibrate" />
 
     <!-- 연속형 개인화 캘리브레이션("패턴 파악") — 캘리브레이션 시간 동안 실주행 패턴을 모아 accel_high를 개인화 -->
@@ -90,7 +63,7 @@
         android:textSize="15sp"
         app:backgroundTint="@color/accent_blue"
         app:cornerRadius="12dp"
-        app:layout_constraintBottom_toTopOf="@id/btnLabelMisop"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toStartOf="@id/btnResetCalibration"
         app:layout_constraintHorizontal_chainStyle="packed" />
@@ -108,20 +81,6 @@
         app:layout_constraintBottom_toBottomOf="@id/btnCalibrate"
         app:layout_constraintTop_toTopOf="@id/btnCalibrate"
         app:layout_constraintStart_toEndOf="@id/btnCalibrate"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnLabelMisop"
-        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-        android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:text="@string/btn_label_misop"
-        android:textColor="@color/text_gray"
-        android:textSize="15sp"
-        app:strokeColor="@color/text_hint"
-        app:cornerRadius="12dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

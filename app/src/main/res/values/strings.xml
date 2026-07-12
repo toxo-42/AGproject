@@ -31,18 +31,11 @@
   <string name="desc_back_button">뒤로 가기</string>
   <string name="desc_device_icon">기기 아이콘</string>
 
-  <!-- 데이터 수집(Phase A): 캘리브레이션 + 오조작 구간 라벨링 -->
+  <!-- 데이터 수집(Phase A): 캘리브레이션 -->
   <string name="title_data_collect">데이터 수집</string>
   <string name="btn_data_collect">데이터 수집 (Collect)</string>
-  <string name="btn_label_misop">오조작 구간 기록</string>
-  <string name="btn_label_misop_on">● 오조작 기록 중</string>
-  <string name="label_indicator_off">○ 정상</string>
-  <string name="label_indicator_on">● 오조작 기록 중</string>
   <string name="live_values_idle">accel  —      brake  —</string>
-  <string name="graph_legend">🟢 accel 🔵 brake   🔴 붉은 실선: 엑셀 임계값</string>
-  <string name="desc_export_csv">CSV 로그 내보내기</string>
-  <string name="msg_export_empty">내보낼 CSV 로그가 없습니다</string>
-  <string name="title_export_chooser">CSV 로그 내보내기</string>
+  <string name="graph_legend">🟢 accel     🔵 brake    🔴 붉은 실선: 엑셀 임계값</string>
 
   <!-- 로깅 데이터 추출(Phase E): 설정 화면에서 세션 선택 후 내보내기 -->
   <string name="desc_export_logs">로깅 데이터 추출</string>

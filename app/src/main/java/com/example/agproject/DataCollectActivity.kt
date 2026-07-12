@@ -1,11 +1,9 @@
 package com.example.agproject
 
-import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.res.ColorStateList
 import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
@@ -15,21 +13,15 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
 import org.json.JSONObject
-import java.io.BufferedOutputStream
-import java.io.File
-import java.io.FileOutputStream
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 
 /**
  * 데이터 수집 화면 (Phase A).
  *
  * FSR 압력값을 실시간 그래프로 보여주고, 그 위에 judge.py 의 오조작 임계값을
  * 붉은 선으로 겹쳐 그린다. "지금 내가 밟는 세기가 임계값 대비 어디쯤인가"를
- * 눈으로 확인하면서 라벨링할 수 있다.
+ * 눈으로 확인할 수 있다.
  *
  * BleService 가 감시 중이어야 데이터가 흐른다(설정 화면에서 진입하기 전에 감시 시작 필요).
  */
@@ -39,13 +31,9 @@ class DataCollectActivity : AppCompatActivity() {
 
   private lateinit var graph: PedalGraphView
   private lateinit var tvLiveValues: TextView
-  private lateinit var tvLabelIndicator: TextView
-  private lateinit var btnLabelMisop: MaterialButton
-  private lateinit var btnExportCsv: ImageButton
   private lateinit var btnCalibrate: MaterialButton
   private lateinit var btnResetCalibration: ImageButton
 
-  private var isLabelingMisop = false
   private var calibrationTimer: CountDownTimer? = null
 
   // 화면 갱신은 BLE 배치(50Hz)마다 오지만, 숫자 텍스트까지 50Hz 로 바꾸면
@@ -88,24 +76,13 @@ class DataCollectActivity : AppCompatActivity() {
 
     graph = findViewById(R.id.graphPedal)
     tvLiveValues = findViewById(R.id.tvLiveValues)
-    tvLabelIndicator = findViewById(R.id.tvLabelIndicator)
-    btnLabelMisop = findViewById(R.id.btnLabelMisop)
-    btnExportCsv = findViewById(R.id.btnExportCsv)
     btnCalibrate = findViewById(R.id.btnCalibrate)
     btnResetCalibration = findViewById(R.id.btnResetCalibration)
 
-    btnExportCsv.setOnClickListener { exportCsvLogs() }
     btnCalibrate.setOnClickListener { startCalibrationFlow() }
     btnResetCalibration.setOnClickListener { confirmResetCalibration() }
 
-    btnLabelMisop.setOnClickListener {
-      isLabelingMisop = !isLabelingMisop
-      sendLabelToService(isLabelingMisop)
-      updateLabelUI()
-    }
-
     showExistingCalibration()   // 이미 캘리브레이션돼 있으면 그 값을 그래프에 바로 반영
-    updateLabelUI()
   }
 
   override fun onResume() {
@@ -124,16 +101,11 @@ class DataCollectActivity : AppCompatActivity() {
 
   override fun onPause() {
     super.onPause()
-    // 화면을 벗어나면 50Hz 브로드캐스트를 끈다. 라벨링도 켜둔 채 나가지 않게 정리.
+    // 화면을 벗어나면 50Hz 브로드캐스트를 끈다.
     setLiveStream(false)
     // 캘리브레이션 자체는 BleService 안에서 화면과 무관하게 계속 진행된다 —
     // 여기서 취소하는 건 화면에 남은 카운트다운 UI뿐.
     calibrationTimer?.cancel()
-    if (isLabelingMisop) {
-      isLabelingMisop = false
-      sendLabelToService(false)
-      updateLabelUI()
-    }
     try {
       unregisterReceiver(liveReceiver)
     } catch (_: IllegalArgumentException) {
@@ -142,13 +114,6 @@ class DataCollectActivity : AppCompatActivity() {
   }
 
   // --- 서비스 통신 ---
-
-  private fun sendLabelToService(misop: Boolean) {
-    startService(Intent(this, BleService::class.java).apply {
-      action = BleService.ACTION_SET_LABEL
-      putExtra(BleService.EXTRA_LABEL, if (misop) BleService.LABEL_MISOP else BleService.LABEL_NORMAL)
-    })
-  }
 
   private fun setLiveStream(enabled: Boolean) {
     startService(Intent(this, BleService::class.java).apply {
@@ -230,50 +195,4 @@ class DataCollectActivity : AppCompatActivity() {
     Toast.makeText(this, R.string.msg_reset_calibration_done, Toast.LENGTH_SHORT).show()
   }
 
-  // --- CSV 내보내기 (개발자용: 반복 학습 시 adb 없이 세션 CSV 전부를 한 번에 회수) ---
-
-  private fun exportCsvLogs() {
-    val logsDir = File(filesDir, "logs")
-    val csvFiles = logsDir.listFiles { f -> f.extension == "csv" }
-    if (csvFiles.isNullOrEmpty()) {
-      Toast.makeText(this, getString(R.string.msg_export_empty), Toast.LENGTH_SHORT).show()
-      return
-    }
-
-    val zipFile = File(cacheDir, "pedal_logs_${System.currentTimeMillis()}.zip")
-    ZipOutputStream(BufferedOutputStream(FileOutputStream(zipFile))).use { zos ->
-      for (f in csvFiles) {
-        zos.putNextEntry(ZipEntry(f.name))
-        f.inputStream().use { it.copyTo(zos) }
-        zos.closeEntry()
-      }
-    }
-
-    val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", zipFile)
-    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-      type = "application/zip"
-      putExtra(Intent.EXTRA_STREAM, uri)
-      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-    startActivity(Intent.createChooser(shareIntent, getString(R.string.title_export_chooser)))
-  }
-
-  // --- UI ---
-
-  @SuppressLint("SetTextI18n")
-  private fun updateLabelUI() {
-    if (isLabelingMisop) {
-      btnLabelMisop.setText(R.string.btn_label_misop_on)
-      btnLabelMisop.setTextColor(getColor(R.color.red_error))
-      btnLabelMisop.strokeColor = ColorStateList.valueOf(getColor(R.color.red_error))
-      tvLabelIndicator.setText(R.string.label_indicator_on)
-      tvLabelIndicator.setTextColor(getColor(R.color.red_error))
-    } else {
-      btnLabelMisop.setText(R.string.btn_label_misop)
-      btnLabelMisop.setTextColor(getColor(R.color.text_gray))
-      btnLabelMisop.strokeColor = ColorStateList.valueOf(getColor(R.color.text_hint))
-      tvLabelIndicator.setText(R.string.label_indicator_off)
-      tvLabelIndicator.setTextColor(getColor(R.color.text_hint))
-    }
-  }
 }
