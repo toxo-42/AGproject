@@ -42,9 +42,10 @@ from features import extract_features
 # 2026-07-13 재조정: 0.10 -> 0.20 (평소 범위와 슬램 사이 여유 확보, 위 모듈 docstring 참고).
 ACCEL_HIGH_OFFSET = 0.20
 
-# brake_low/high_ratio는 아직 개인화 안 함 — PROFILES["normal"]과 동일한 임시값.
+# brake_low/high_ratio/accel_rate_high 는 아직 개인화 안 함 — PROFILES["normal"]과 동일한 임시값.
 DEFAULT_BRAKE_LOW = 0.10
 DEFAULT_HIGH_RATIO = 0.50
+DEFAULT_ACCEL_RATE_HIGH = 0.30
 
 
 def calibrate_thresholds(samples: list[list[float]]) -> dict[str, float]:
@@ -58,6 +59,7 @@ def calibrate_thresholds(samples: list[list[float]]) -> dict[str, float]:
         "accel_high": round(accel_high, 4),
         "brake_low": DEFAULT_BRAKE_LOW,
         "high_ratio": DEFAULT_HIGH_RATIO,
+        "accel_rate_high": DEFAULT_ACCEL_RATE_HIGH,
     }
 
 

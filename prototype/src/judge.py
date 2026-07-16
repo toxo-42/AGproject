@@ -22,20 +22,29 @@ from __future__ import annotations
 
 import json
 
+# RAW 스트림은 STM32 200Hz 고정(BLE_RAW_스트림_규격.md §3) — 샘플 간격 5ms.
+# 사람이 페달을 "확 밟아도" 보통 50~150ms는 걸리므로, 급조작 트리거는 인접 샘플(5ms)이
+# 아니라 이만큼(=10샘플=50ms) 떨어진 샘플과 비교해야 실제로 의미 있는 델타가 나온다
+# (2026-07-14, 인접 샘플 기준으로 갔다가 트리거가 전혀 안 뜨는 문제를 겪고 수정).
+RATE_LAG_SAMPLES = 10
+
 # 프로필별 판정 임계값 --------------------------------------------------------
 # ⚠️ 전부 실데이터 튜닝 전 임시값. 아래는 '의도'일 뿐이며 측정으로 대체해야 한다.
 #
-#   accel_high : 엑셀이 이 이상이면 '깊게 밟음'
-#   brake_low  : 브레이크가 이 이하면 '거의 안 밟음'
-#   high_ratio : 윈도우 내 '엑셀 깊게 + 브레이크 안 밟음' 비율이 이 이상이면 오조작
+#   accel_high     : 엑셀이 이 이상이면 '깊게 밟음'
+#   brake_low      : 브레이크가 이 이하면 '거의 안 밟음'
+#   high_ratio     : 윈도우 내 '엑셀 깊게 + 브레이크 안 밟음' 비율이 이 이상이면 오조작(레벨 조건)
+#   accel_rate_high: RATE_LAG_SAMPLES(50ms) 간격 엑셀 변화량(델타)의 최댓값이 이 이상이면
+#                    '급조작'(트리거 조건)
 #
 # 의도: 평소 페달을 깊게 밟는 사람(strong)에겐 깊게 밟는 것 자체가 정상이므로
 #       accel_high 를 올려 오경보를 줄이고, 약하게 밟는 사람(weak)은 낮춰 민감하게 한다.
 #       brake_low 도 같은 방향으로 움직인다(강하게 밟는 사람은 '살짝 밟은' 값도 크다).
+#       accel_rate_high 도 마찬가지로 강하게 밟는 사람은 평소에도 빠르게 밟는 경향이 있어 올린다.
 PROFILES: dict[str, dict[str, float]] = {
-    "strong": {"accel_high": 0.92, "brake_low": 0.15, "high_ratio": 0.55},
-    "normal": {"accel_high": 0.85, "brake_low": 0.10, "high_ratio": 0.50},
-    "weak": {"accel_high": 0.75, "brake_low": 0.07, "high_ratio": 0.45},
+    "strong": {"accel_high": 0.92, "brake_low": 0.15, "high_ratio": 0.55, "accel_rate_high": 0.35},
+    "normal": {"accel_high": 0.85, "brake_low": 0.10, "high_ratio": 0.50, "accel_rate_high": 0.30},
+    "weak": {"accel_high": 0.75, "brake_low": 0.07, "high_ratio": 0.45, "accel_rate_high": 0.25},
 }
 
 DEFAULT_PROFILE = "normal"
@@ -63,32 +72,57 @@ def judge_with_thresholds(samples: list[list[float]], thresholds: dict[str, floa
     """윈도우 하나 + 임계값 세트를 직접 받아 오조작 여부를 판정.
 
     3단계 프로필(get_thresholds)이든, 캘리브레이션으로 계산한 연속형 임계값
-    (calibration.calibrate_thresholds)이든 이 함수 입장에서는 그냥 숫자 3개일
+    (calibration.calibrate_thresholds)이든 이 함수 입장에서는 그냥 숫자 4개일
     뿐이다 — '어디서 온 임계값인가'와 '지금 오조작인가'를 분리하기 위한 공용 코어.
+
+    두 조건을 따로 계산해서 각각 다른 역할로 쓴다(2026-07-14 사용자 결정):
+      - misop   : 레벨 조건(엑셀 깊게 + 브레이크 안 밟음 비율). "지금 이 상태가
+                  유지되고 있는가" — 호출부(BleService)의 지속시간(sustain) 판정에 쓴다.
+      - trigger : 변화율(미분) 조건. RATE_LAG_SAMPLES 만큼 떨어진 두 샘플 사이 엑셀 델타의
+                  최댓값이 accel_rate_high 이상이면 True — "방금 급격히 밟았는가"를 잡는다.
+                  급조작(찰나에 확 밟음)과 서서히 페달을 깊게 밟아가는 정상 주행을 구분하려고
+                  misop과 분리했다. 트리거는 순간적인 사건이라 misop처럼 여러 윈도우 연속을
+                  요구하면 안 된다(스파이크 직후엔 이미 레벨이 높아서 델타가 다시 작아지기
+                  때문) — 지속시간 판정은 misop 쪽에서 하고, trigger는 그 지속시간 카운트를
+                  시작해도 되는지 '무장(arm)'만 담당한다.
+
+                  ⚠️ 2026-07-14 실기기 검증 후 수정: 처음엔 "인접 샘플(5ms) 간 델타"로
+                  계산했는데, 사람이 페달을 확 밟아도 보통 50~150ms는 걸려서 5ms 단위로 보면
+                  델타가 0.03~0.1 수준밖에 안 나와 accel_rate_high(0.25~0.35)를 절대
+                  못 넘겼다(트리거가 영영 안 뜸). "확 밟기"의 실제 시간 스케일에 맞추려고
+                  인접 샘플이 아니라 RATE_LAG_SAMPLES(50ms)만큼 떨어진 샘플과 비교한다.
 
     label 은 결과의 "profile" 필드에 그대로 실린다(로그/디버깅용 표시 이름).
     """
     if not samples:
-        return {"misop": False, "score": 0.0, "profile": label, "reason": "empty"}
+        return {"misop": False, "trigger": False, "score": 0.0, "rate": 0.0, "profile": label, "reason": "empty"}
 
     accel_high = thresholds["accel_high"]
     brake_low = thresholds["brake_low"]
     high_ratio = thresholds["high_ratio"]
+    accel_rate_high = thresholds["accel_rate_high"]
 
     hits = 0
-    for accel, brake in samples:
+    max_rate = 0.0
+    for i, (accel, brake) in enumerate(samples):
         if accel >= accel_high and brake <= brake_low:
             hits += 1
+        if i >= RATE_LAG_SAMPLES:
+            max_rate = max(max_rate, accel - samples[i - RATE_LAG_SAMPLES][0])
 
     score = hits / len(samples)
     misop = score >= high_ratio
+    trigger = max_rate >= accel_rate_high
     reason = (
         f"[{label}] 엑셀>={accel_high} & 브레이크<={brake_low} 비율 {score:.2f}"
-        f" ({'>=' if misop else '<'} {high_ratio})"
+        f" ({'>=' if misop else '<'} {high_ratio}) / 델타 {max_rate:.2f}"
+        f" ({'>=' if trigger else '<'} {accel_rate_high})"
     )
     return {
         "misop": misop,
+        "trigger": trigger,
         "score": round(score, 3),
+        "rate": round(max_rate, 3),
         "profile": label,
         "reason": reason,
     }

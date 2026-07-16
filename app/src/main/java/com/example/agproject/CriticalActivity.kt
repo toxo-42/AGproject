@@ -32,7 +32,6 @@ class CriticalActivity : AppCompatActivity() {
     }
   }
 
-  // 🚨 뒤로가기 버튼 막기 (안전장치)
   // 운전자가 당황해서 실수로 뒤로가기를 눌러 경고창이 꺼지는 것을 방지합니다.
   @Suppress("DEPRECATION")
   override fun onBackPressed() {

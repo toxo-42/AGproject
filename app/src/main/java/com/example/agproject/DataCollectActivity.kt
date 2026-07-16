@@ -112,7 +112,7 @@ class DataCollectActivity : AppCompatActivity() {
       }
     }
 
-    showExistingCalibration()   // 이미 캘리브레이션돼 있으면 그 값을 그래프에 바로 반영
+    // 그래프에 기존 캘리브레이션 값 반영은 onResume()에서 항상 수행한다(재진입 시 재동기화 포함).
   }
 
   override fun onResume() {
@@ -127,6 +127,14 @@ class DataCollectActivity : AppCompatActivity() {
       ContextCompat.registerReceiver(this, liveReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
     setLiveStream(true)
+
+    // 다른 앱으로 전환됐다 돌아온 경우를 포함해 매 resume마다 최신 상태로 재동기화한다.
+    // 캘리브레이션은 화면과 무관하게 BleService 안에서 계속 진행되지만, 그동안 끝난
+    // ACTION_CALIBRATION_DONE 브로드캐스트는 리시버가 꺼져 있어 유실됐을 수 있다 —
+    // 그래서 그래프는 항상 prefs의 최신값으로 다시 반영하고, 카운트다운 UI도 진행 중이면
+    // 남은 시간을 역산해 복구한다(2026-07-14, "cal 하다가 다른 앱 가면 멈춘 것처럼 보인다" 수정).
+    showExistingCalibration()
+    restoreCalibrationProgressIfRunning()
   }
 
   override fun onPause() {
@@ -207,6 +215,33 @@ class DataCollectActivity : AppCompatActivity() {
       override fun onFinish() {
         // 실제 적용 확인은 ACTION_CALIBRATION_DONE 브로드캐스트로 받지만,
         // 못 받는 경우(예: 계산 실패)에도 버튼은 복구되게 여기서도 되돌린다.
+        btnCalibrate.isEnabled = true
+        btnCalibrate.setText(R.string.btn_calibrate)
+      }
+    }.start()
+  }
+
+  // 캘리브레이션이 여전히 진행 중이면(다른 앱에 가 있던 동안 시작됐거나 계속되고 있으면)
+  // 남은 시간을 역산해 카운트다운 UI를 복구한다. 이미 끝났으면(remaining <= 0) 곧
+  // ACTION_CALIBRATION_DONE 이 오거나 이미 처리됐을 것이므로, showExistingCalibration()이
+  // 반영한 최신 그래프 값으로 충분하고 여기선 아무것도 안 한다.
+  private fun restoreCalibrationProgressIfRunning() {
+    val startMs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+      .getLong(BleService.PREF_CALIBRATION_START_MS, -1L)
+    if (startMs <= 0L) return
+
+    val remaining = BleService.CALIBRATION_DURATION_MS - (System.currentTimeMillis() - startMs)
+    if (remaining <= 0L) return
+
+    btnCalibrate.isEnabled = false
+    calibrationTimer?.cancel()
+    calibrationTimer = object : CountDownTimer(remaining, 1_000) {
+      override fun onTick(millisUntilFinished: Long) {
+        val secondsLeft = (millisUntilFinished / 1000).toInt() + 1
+        btnCalibrate.text = getString(R.string.btn_calibrate_running, secondsLeft)
+      }
+
+      override fun onFinish() {
         btnCalibrate.isEnabled = true
         btnCalibrate.setText(R.string.btn_calibrate)
       }

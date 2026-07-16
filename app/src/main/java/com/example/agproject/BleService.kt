@@ -53,6 +53,13 @@ class BleService : Service() {
   // 않고 봐주는 여유 구간(MISOP_GAP_TOLERANCE_WINDOWS). 이 여유를 넘겨야 실제 회복으로 본다.
   private var misopGapWindows = 0
 
+  // 급조작(찰나에 확 밟음)과 서서히 깊게 밟는 정상 주행을 구분하기 위한 무장(arm) 상태
+  // (2026-07-14 사용자 결정). judge.py 의 "trigger"(엑셀 변화율 급증)가 한 번 나와야
+  // armed=true 가 되고, 그 이후에만 위 지속시간 카운트가 진행된다 — 즉 "레벨이 계속
+  // 유지되는가"는 트리거로 무장된 뒤에만 의미를 갖는다. gap tolerance 초과로 회복
+  // 판정되면 armed 도 함께 해제되어, 다음 경고를 띄우려면 트리거가 다시 발동해야 한다.
+  private var armed = false
+
   // ── RAW 원시 샘플 CSV 로깅 (Phase A/E: 학습 데이터 + 증거자료) ──────────
   // 첫 윈도우가 찰 때 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
   // 저장 위치: filesDir/logs/pedal_yyyyMMdd_HHmmss.csv (권한 불필요, adb pull 로 회수)
@@ -142,8 +149,8 @@ class BleService : Service() {
     // 급발진 시나리오는 엑셀을 브레이크로 착각해 "꾹 밟고 유지"하는 패턴이라, 짧은 스파이크성
     // 오조작(밟았다 바로 뗌)과 구분하려면 misop=true 가 일정 시간 이상 연속으로 나와야 한다.
     // 값은 전부 실측 튜닝 전 임시값 — 실제로 밟아보면서 조정할 것.
-    private const val MISOP_SUSTAIN_WINDOWS = 8       // 8윈도우 = 2.0초 (WINDOW_SIZE 기준), 튜닝 대상
-    private const val MISOP_GAP_TOLERANCE_WINDOWS = 2  // 2윈도우 = 0.5초 까지는 끊김 허용, 튜닝 대상
+    private const val MISOP_SUSTAIN_WINDOWS = 2       // window 1 = 0.25 sec
+    private const val MISOP_GAP_TOLERANCE_WINDOWS = 1
 
     // 로그 스로틀 주기 (수신 요약 / 판정 하트비트)
     private const val RAW_LOG_INTERVAL_MS = 5_000L
@@ -177,6 +184,13 @@ class BleService : Service() {
     const val EXTRA_THRESHOLDS_JSON = "THRESHOLDS_JSON"
     const val PREF_CALIBRATED_THRESHOLDS = "CALIBRATED_THRESHOLDS_JSON"
     const val CALIBRATION_DURATION_MS = 30_000L
+
+    // 캘리브레이션 시작 시각(epoch ms) — 화면(DataCollectActivity)이 다른 앱으로 전환됐다가
+    // 돌아왔을 때 "지금 캘리브레이션이 진행 중인지, 얼마나 남았는지"를 되살리는 용도(2026-07-14).
+    // 캘리브레이션 자체는 이 값과 무관하게 BleService 안에서 계속 진행되지만, 진행 상황을
+    // 보여주는 카운트다운 UI는 Activity 로컬 상태라 화면이 꺼졌다 돌아오면 복구할 방법이
+    // 없었다 — 그래서 시작 시각만 prefs에 남겨 Activity가 onResume에서 역산하게 한다.
+    const val PREF_CALIBRATION_START_MS = "CALIBRATION_START_MS"
 
     // ── 실시간 그래프 스트림 (DataCollectActivity 전용) ──────────────
     // 50Hz 브로드캐스트라 평소엔 낭비다. 수집 화면이 떠 있는 동안만 켠다.
@@ -522,6 +536,11 @@ class BleService : Service() {
     calibrationStartMs = System.currentTimeMillis()
     isCalibrating = true
     applyCalibratedThresholds(null)
+    // DataCollectActivity가 다른 앱으로 전환됐다 돌아왔을 때 진행 상황을 되살릴 수 있게
+    // 시작 시각을 prefs에 남긴다(위 PREF_CALIBRATION_START_MS 주석 참고).
+    getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
+      .putLong(PREF_CALIBRATION_START_MS, calibrationStartMs)
+      .apply()
     Log.i(tag, "캘리브레이션 시작 (${CALIBRATION_DURATION_MS / 1000}초) — 완료 전까지 판정 중단")
   }
 
@@ -529,6 +548,9 @@ class BleService : Service() {
   // 개인화된 임계값을 계산하고, 즉시 적용 + prefs 에 저장(다음 주행에도 재사용).
   private fun finishCalibration() {
     isCalibrating = false
+    getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
+      .remove(PREF_CALIBRATION_START_MS)
+      .apply()
     val samples = ArrayList(calibrationBuffer)
     calibrationBuffer.clear()
 
@@ -552,6 +574,10 @@ class BleService : Service() {
         .apply()
 
       Log.i(tag, "캘리브레이션 완료 (${samples.size}샘플): $thresholdsJson")
+
+      // 다른 앱으로 전환된 상태라 ACTION_CALIBRATION_DONE 브로드캐스트를 놓쳐도(§DataCollectActivity
+      // onResume 재동기화로 화면은 커버됨) 완료 사실 자체는 시스템 알림으로 바로 알려준다(2026-07-14).
+      showHeadsUpNotification("PeOb", "패턴 파악이 완료되었습니다")
 
       val intent = Intent(ACTION_CALIBRATION_DONE)
       intent.setPackage(packageName)
@@ -713,6 +739,7 @@ class BleService : Service() {
         .toString()
       val result = JSONObject(resultJson)
       val misop = result.getBoolean("misop")
+      val trigger = result.getBoolean("trigger")
       val score = result.getDouble("score")
       val appliedLabel = result.getString("profile")   // 항상 "personalized" (judge_calibrated_json 고정값)
 
@@ -731,23 +758,31 @@ class BleService : Service() {
         lastJudgeLogMs = nowMs
       }
 
-      // 지속시간 카운트: misop=true 가 여러 윈도우 연속으로 나와야 경고를 띄운다.
-      // 도중에 misop=false 가 잠깐(MISOP_GAP_TOLERANCE_WINDOWS 이내) 섞여도 카운트를
-      // 리셋하지 않고 봐준다 — 그 여유를 넘겨야 실제로 회복된 것으로 본다.
-      if (misop) {
-        consecutiveMisopWindows++
-        misopGapWindows = 0
-      } else {
-        misopGapWindows++
-        if (misopGapWindows > MISOP_GAP_TOLERANCE_WINDOWS) {
-          consecutiveMisopWindows = 0
-          lastMisopShown = false // 실제로 회복됐을 때만 다음 오조작을 다시 경고할 수 있게 재무장
-        }
-      }
+      // trigger(엑셀 변화율 급증)가 한 번이라도 나오면 무장 — 이후에만 아래 지속시간
+      // 카운트가 진행된다. 트리거 없이 서서히 레벨만 올라간 경우는 애초에 카운트가
+      // 시작되지 않는다.
+      if (trigger) armed = true
 
-      if (consecutiveMisopWindows >= MISOP_SUSTAIN_WINDOWS && !lastMisopShown) {
-        lastMisopShown = true
-        onPedalMisoperation()
+      // 지속시간 카운트: 무장된 상태에서 misop=true 가 여러 윈도우 연속으로 나와야
+      // 경고를 띄운다. 도중에 misop=false 가 잠깐(MISOP_GAP_TOLERANCE_WINDOWS 이내)
+      // 섞여도 카운트를 리셋하지 않고 봐준다 — 그 여유를 넘겨야 실제로 회복된 것으로 본다.
+      if (armed) {
+        if (misop) {
+          consecutiveMisopWindows++
+          misopGapWindows = 0
+        } else {
+          misopGapWindows++
+          if (misopGapWindows > MISOP_GAP_TOLERANCE_WINDOWS) {
+            consecutiveMisopWindows = 0
+            armed = false // 회복됐으니 무장 해제 — 다음 경고는 새 트리거가 있어야 다시 뜬다
+            lastMisopShown = false // 실제로 회복됐을 때만 다음 오조작을 다시 경고할 수 있게 재무장
+          }
+        }
+
+        if (consecutiveMisopWindows >= MISOP_SUSTAIN_WINDOWS && !lastMisopShown) {
+          lastMisopShown = true
+          onPedalMisoperation()
+        }
       }
     } catch (e: Exception) {
       Log.e(tag, "judge 호출 실패: ${e.message}", e)
