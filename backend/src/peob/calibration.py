@@ -63,6 +63,24 @@ def calibrate_thresholds(samples: list[list[float]]) -> dict[str, float]:
     }
 
 
+def preset_thresholds(accel_high: float) -> dict[str, float]:
+    """accel_high 만 고정값으로 정한 임계값 세트 — 캘리브레이션 없이 쓸 때(개발자 수집 페르소나 프리셋).
+
+    나머지 값은 calibrate_thresholds() 와 같은 기본값을 쓴다(한곳에서 관리).
+    """
+    return {
+        "accel_high": round(min(accel_high, 1.0), 4),
+        "brake_low": DEFAULT_BRAKE_LOW,
+        "high_ratio": DEFAULT_HIGH_RATIO,
+        "accel_rate_high": DEFAULT_ACCEL_RATE_HIGH,
+    }
+
+
+def preset_thresholds_json(accel_high: float) -> str:
+    """Chaquopy 경계용: preset_thresholds() 를 JSON 문자열로 반환."""
+    return json.dumps(preset_thresholds(accel_high))
+
+
 def calibrate_thresholds_json(samples_json: str) -> str:
     """Chaquopy 경계용: 캘리브레이션 세션(JSON 문자열)을 받아 임계값 세트를 JSON으로 반환.
 

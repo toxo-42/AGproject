@@ -233,7 +233,7 @@ class MainActivity : AppCompatActivity() {
     val prefs: SharedPreferences = getSharedPreferences("AgPrefs", MODE_PRIVATE)
     targetAddress = prefs.getString("TARGET_ADDRESS", null)
     targetName = prefs.getString("TARGET_NAME", "AG_Test_Module")
-    isCalibrated = CalibrationPrefs.calibration(prefs) != null
+    isCalibrated = CalibrationPrefs.isDetectionReady(prefs)
   }
 
   private fun startSystem() {
@@ -304,8 +304,7 @@ class MainActivity : AppCompatActivity() {
   // 사용자가 이걸 모르고 지나치지 않게 강제로 안내한다.
   private fun maybeShowCalibrationOnboarding() {
     if (isCalibrationPopupShowing || isFinishing || isDestroyed) return
-    val calibrated = CalibrationPrefs.calibration(getSharedPreferences("AgPrefs", MODE_PRIVATE))
-    if (calibrated != null) return
+    if (CalibrationPrefs.isDetectionReady(getSharedPreferences("AgPrefs", MODE_PRIVATE))) return
 
     isCalibrationPopupShowing = true
     val dialog = androidx.appcompat.app.AlertDialog.Builder(this)

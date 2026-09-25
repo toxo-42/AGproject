@@ -118,12 +118,9 @@ class BleService : Service() {
   // BLE 콜백 스레드가 읽고 UI 스레드가 쓰므로 @Volatile 필요.
   @Volatile private var currentLabel = LABEL_NORMAL
 
-  // 개발자 데이터 수집 페르소나(null = 사용자 본인) — 그 캘리브레이션으로 판정하고, CSV persona 컬럼에 찍는다.
+  // 개발자 데이터 수집 페르소나(null = 사용자 본인) — 고르면 그 프리셋으로 판정하고, CSV persona 컬럼에 찍는다.
   // 감시 시작 시 prefs 에서 읽고, 개발자 수집 화면에서 바꾸면 ACTION_SET_PERSONA 로 다시 읽는다.
   @Volatile private var currentPersona: Persona? = null
-
-  // 캘리브레이션을 시작한 페르소나 — 도중에 바꿔도 결과는 시작한 쪽 몫으로 저장한다.
-  private var calibrationPersona: Persona? = null
 
   // 수집 화면이 떠 있는 동안만 true. BLE 콜백 스레드가 읽고 메인 스레드가 쓴다.
   @Volatile private var liveStreamEnabled = false
@@ -267,7 +264,7 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
-    // 페르소나 변경 — 그 캘리브레이션으로 즉시 교체(패턴 파악 중이면 끝난 뒤 반영).
+    // 페르소나 변경 — 그 프리셋(또는 "없음"이면 사용자 캘리브레이션)으로 즉시 교체(패턴 파악 중이면 끝난 뒤 반영).
     if (intent?.action == ACTION_SET_PERSONA) {
       currentPersona = CalibrationPrefs.currentPersona(agPrefs())
       if (!isCalibrating) applyCalibratedThresholds(readCalibratedThresholds())
@@ -292,8 +289,8 @@ class BleService : Service() {
     // judgeWindow 가 판정을 건너뛰므로(calibratedThresholdsJson == null) 오조작 감지도 꺼진다.
     if (intent?.action == ACTION_CLEAR_CALIBRATION) {
       applyCalibratedThresholds(null)
-      CalibrationPrefs.clearCalibration(agPrefs(), currentPersona)
-      Log.i(tag, "캘리브레이션 초기화(${currentPersona?.id ?: Persona.NONE_ID}) — 판정 중단 상태로 복귀")
+      CalibrationPrefs.clearUserCalibration(agPrefs())
+      Log.i(tag, "캘리브레이션 초기화 — 판정 중단 상태로 복귀")
       return START_NOT_STICKY
     }
 
@@ -556,7 +553,17 @@ class BleService : Service() {
 
   private fun agPrefs() = getSharedPreferences("AgPrefs", MODE_PRIVATE)
 
-  private fun readCalibratedThresholds(): String? = CalibrationPrefs.calibration(agPrefs(), currentPersona)
+  // 판정에 쓸 임계값 JSON — 개발자 페르소나를 골랐으면 그 프리셋, 아니면 사용자 캘리브레이션(없으면 null).
+  private fun readCalibratedThresholds(): String? {
+    val persona = currentPersona ?: return CalibrationPrefs.userCalibration(agPrefs())
+    return try {
+      Python.getInstance().getModule("peob.calibration")
+        .callAttr("preset_thresholds_json", persona.accelHigh).toString()
+    } catch (e: Exception) {
+      Log.e(tag, "페르소나 프리셋 생성 실패: ${e.message}", e)
+      null
+    }
+  }
 
   // calibratedThresholdsJson, currentAccelHigh(캐시), detector 를 항상 같이 갱신 — 따로 손대면
   // CSV의 accel_high 나 판정 상태기계가 실제 임계값과 어긋난다.
@@ -582,7 +589,6 @@ class BleService : Service() {
   private fun startCalibration() {
     calibrationBuffer.clear()
     calibrationStartMs = System.currentTimeMillis()
-    calibrationPersona = currentPersona
     isCalibrating = true
     applyCalibratedThresholds(null)
     // DataCollectActivity가 다른 앱으로 전환됐다 돌아왔을 때 진행 상황을 되살릴 수 있게
@@ -617,11 +623,11 @@ class BleService : Service() {
         .callAttr("calibrate_thresholds_json", samplesJson.toString())
         .toString()
 
-      CalibrationPrefs.saveCalibration(agPrefs(), calibrationPersona, thresholdsJson)
-      // 도중에 페르소나가 바뀌었으면 지금 페르소나의 값으로 판정을 이어간다
+      CalibrationPrefs.saveUserCalibration(agPrefs(), thresholdsJson)
+      // 도중에 페르소나를 골랐으면 그 프리셋으로 판정을 이어간다
       applyCalibratedThresholds(readCalibratedThresholds())
 
-      Log.i(tag, "캘리브레이션 완료(${calibrationPersona?.id ?: Persona.NONE_ID}, ${samples.size}샘플): $thresholdsJson")
+      Log.i(tag, "캘리브레이션 완료(${samples.size}샘플): $thresholdsJson")
 
       // 다른 앱으로 전환된 상태라 ACTION_CALIBRATION_DONE 브로드캐스트를 놓쳐도(§DataCollectActivity
       // onResume 재동기화로 화면은 커버됨) 완료 사실 자체는 시스템 알림으로 바로 알려준다(2026-07-14).

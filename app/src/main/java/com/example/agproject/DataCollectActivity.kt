@@ -90,8 +90,8 @@ class DataCollectActivity : AppCompatActivity() {
 
     devMode = intent.getBooleanExtra(EXTRA_DEV_MODE, false)
     if (devMode) {
-      // dev mode: 페르소나 선택 + 오조작 라벨 토글을 보인다. 페르소나마다 캘리브레이션이 따로라
-      // 패턴 파악 버튼도 그대로 쓴다(페르소나를 고른 뒤 패턴 파악 → 그 페르소나 몫으로 저장).
+      // dev mode: 페르소나 선택 + 오조작 라벨 토글을 보인다. 페르소나를 고르면 프리셋 임계값을 쓰므로
+      // 패턴 파악 버튼은 숨긴다("없음"일 때만 보임 — applyPersonaUi 참고).
       setupPersonaToggle()
       btnLabelMisop.visibility = android.view.View.VISIBLE
       btnLabelMisop.setOnClickListener { toggleMisopLabel() }
@@ -120,7 +120,7 @@ class DataCollectActivity : AppCompatActivity() {
     // 남은 시간을 역산해 복구한다(2026-07-14, "cal 하다가 다른 앱 가면 멈춘 것처럼 보인다" 수정).
     showExistingCalibration()
     restoreCalibrationProgressIfRunning()
-    updateTitle()
+    applyPersonaUi()
   }
 
   override fun onPause() {
@@ -201,22 +201,30 @@ class DataCollectActivity : AppCompatActivity() {
       if (BleService.monitorState.isActive) {
         startService(Intent(this, BleService::class.java).apply { action = BleService.ACTION_SET_PERSONA })
       }
-      // 페르소나마다 캘리브레이션이 다르므로 그래프 임계선·제목도 새로 반영
+      // 페르소나마다 임계값이 다르므로 그래프 임계선·제목·버튼도 새로 반영
       graph.setThresholds(PedalGraphView.DEFAULT_ACCEL_HIGH, PedalGraphView.DEFAULT_BRAKE_LOW)
       showExistingCalibration()
-      updateTitle()
+      applyPersonaUi()
     }
   }
 
-  // dev mode 에서 페르소나를 골라 뒀으면 제목에 표시 — 지금 누구 몫으로 기록·캘리브레이션되는지
-  private fun updateTitle() {
-    val persona = if (devMode) CalibrationPrefs.currentPersona(getSharedPreferences("AgPrefs", MODE_PRIVATE)) else null
+  // dev mode 에서 페르소나를 골라 뒀으면: 제목에 표시(지금 누구로 기록되는지) + 패턴 파악 버튼 숨김
+  // (프리셋을 쓰므로 캘리브레이션이 필요 없고, 누르면 사용자 본인 캘리브레이션을 덮어쓰게 되므로).
+  // INVISIBLE 로 숨겨 tvLegend 등 나머지 레이아웃 제약이 흔들리지 않게 한다.
+  private fun applyPersonaUi() {
+    val persona = currentDevPersona()
     tvCollectTitle.text = if (persona == null) {
       getString(R.string.title_data_collect)
     } else {
       getString(R.string.title_data_collect_persona, getString(R.string.title_data_collect), getString(persona.labelRes))
     }
+    val visibility = if (persona == null) android.view.View.VISIBLE else android.view.View.INVISIBLE
+    btnCalibrate.visibility = visibility
+    btnResetCalibration.visibility = visibility
   }
+
+  private fun currentDevPersona(): Persona? =
+    if (devMode) CalibrationPrefs.currentPersona(getSharedPreferences("AgPrefs", MODE_PRIVATE)) else null
 
   // --- 연속형 개인화 캘리브레이션("패턴 파악") ---
 
@@ -285,7 +293,12 @@ class DataCollectActivity : AppCompatActivity() {
   // 이미 캘리브레이션된 값이 있으면(다음 주행 재사용 케이스) 화면 진입 시 바로 그래프에 반영한다.
   // 없으면 PedalGraphView 기본값(0.85/0.10)이 임시 참고선으로 남는다.
   private fun showExistingCalibration() {
-    val json = CalibrationPrefs.calibration(getSharedPreferences("AgPrefs", MODE_PRIVATE)) ?: return
+    // 개발자 페르소나를 골라 뒀으면 그 프리셋 임계선을 그린다(brake_low 는 기본값)
+    currentDevPersona()?.let {
+      graph.setThresholds(it.accelHigh, PedalGraphView.DEFAULT_BRAKE_LOW)
+      return
+    }
+    val json = CalibrationPrefs.userCalibration(getSharedPreferences("AgPrefs", MODE_PRIVATE)) ?: return
     applyThresholdsToGraph(json)
   }
 
