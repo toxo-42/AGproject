@@ -11,3 +11,13 @@ dependencies = ["peob"]
 
 [tool.uv.sources]
 peob = { path = "../backend", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# src/ 의 스크립트 모듈(dataset, train_thresholds …)을 패키지 없이 바로 import
+pythonpath = ["src"]

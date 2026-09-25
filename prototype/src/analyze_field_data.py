@@ -1,7 +1,8 @@
 """실주행 CSV로 개인화 파이프라인 1차 검증 — Phase B 오프라인 분석.
 
 BleService.kt 가 기록한 CSV(4Hz, 판정 윈도우 하나당 1행)를 읽어서:
-  1. style(강/보통/약)별 feature 비교 — extract_features() 로 정말 세기가 갈리는지.
+  1. 페르소나(초보/평범/난폭, 옛 CSV 는 style 강/보통/약을 매핑)별 feature 비교 — extract_features() 로
+     정말 세기가 갈리는지.
   2. 세션별로 calibrate_thresholds() 를 다시 돌려 accel_high 가 세션마다 얼마나
      흔들리는지(안정성) 확인 — normal/strong 경계가 불안정했던 문제(§진행상황_및_로드맵.md
      Phase B, 2026-07-13 실험)가 이번에 모은 데이터에서도 재현되는지 보는 용도.
@@ -25,10 +26,11 @@ import csv
 import sys
 from pathlib import Path
 
+from dataset import persona_of
 from peob.calibration import calibrate_thresholds
 from peob.features import extract_features
 
-STYLE_KEYS = ("weak", "normal", "strong")
+PERSONA_KEYS = ("beginner", "normal", "aggressive")
 
 # CSV 행은 200Hz 원시 스트림이 아니라 판정 윈도우(0.25초)당 1행 = 4Hz. extract_features() 의
 # press_rate_per_min/press_duration_mean_sec 는 sample_rate_hz 로 "시간"을 역산하므로, 기본값
@@ -54,42 +56,42 @@ def _parse_float(s: str | None) -> float | None:
     return float(s)
 
 
-def samples_by_style(rows: list[dict]) -> dict[str, list[list[float]]]:
-    """style 컬럼 기준으로 [accel, brake] 샘플을 묶는다. style 컬럼이 없는 구 스키마는 자연히 빈 채로 남는다."""
-    buckets: dict[str, list[list[float]]] = {k: [] for k in STYLE_KEYS}
+def samples_by_persona(rows: list[dict]) -> dict[str, list[list[float]]]:
+    """페르소나 기준으로 [accel, brake] 샘플을 묶는다. 페르소나 정보가 없는 행은 빠진다."""
+    buckets: dict[str, list[list[float]]] = {k: [] for k in PERSONA_KEYS}
     for row in rows:
-        style = row.get("style")
-        if style not in STYLE_KEYS:
+        persona = persona_of(row)
+        if persona not in PERSONA_KEYS:
             continue
         accel = _parse_float(row.get("accel"))
         brake = _parse_float(row.get("brake"))
         if accel is None or brake is None:
             continue
-        buckets[style].append([accel, brake])
+        buckets[persona].append([accel, brake])
     return buckets
 
 
 def feature_report(name: str, rows: list[dict]) -> None:
-    buckets = samples_by_style(rows)
+    buckets = samples_by_persona(rows)
     if not any(buckets.values()):
         return
-    print(f"\n=== {name}: style별 feature ===")
+    print(f"\n=== {name}: 페르소나별 feature ===")
     cols = ["n", "accel_p90", "accel_active_p90", "accel_active_mean",
             "press_rate_per_min", "press_duration_mean_sec", "brake_mean"]
-    print(f"  {'style':<8}" + "".join(f"{c:>22}" for c in cols))
-    for style in STYLE_KEYS:
-        samples = buckets[style]
+    print(f"  {'persona':<11}" + "".join(f"{c:>22}" for c in cols))
+    for persona in PERSONA_KEYS:
+        samples = buckets[persona]
         if not samples:
             continue
         f = extract_features(samples, sample_rate_hz=CSV_ROW_RATE_HZ)
         values = [len(samples), f["accel_p90"], f["accel_active_p90"], f["accel_active_mean"],
                   f["press_rate_per_min"], f["press_duration_mean_sec"], f["brake_mean"]]
-        print(f"  {style:<8}" + "".join(f"{v:>22}" for v in values))
+        print(f"  {persona:<11}" + "".join(f"{v:>22}" for v in values))
 
 
 def calibration_stability_report(sessions: list[tuple[str, list[dict]]]) -> None:
     print("\n=== 세션별 calibrate_thresholds() 안정성 (accel_high 재계산) ===")
-    print("  (참고: 캘리브레이션 세션이 아니라 style 라벨링 세션이라도, 그 세션 데이터를")
+    print("  (참고: 캘리브레이션 세션이 아니라 페르소나 수집 세션이라도, 그 세션 데이터를")
     print("   캘리브레이션 입력이라 가정하면 accel_high가 얼마로 잡히는지를 보는 것 — 세션 간")
     print("   변동폭이 크면 normal/strong 경계 불안정 문제가 이번 데이터에도 있다는 뜻)")
     for name, rows in sessions:
@@ -297,7 +299,7 @@ def main() -> None:
         print("CSV 파일을 못 찾았습니다.")
         return
 
-    style_sessions: list[tuple[str, list[dict]]] = []
+    persona_sessions: list[tuple[str, list[dict]]] = []
     for path in files:
         rows = load_rows(path)
         if not rows:
@@ -308,11 +310,11 @@ def main() -> None:
         accel_rate_report(path.name, rows)
         armed_state_report(path.name, rows)
 
-        if any(r.get("style") in STYLE_KEYS for r in rows):
-            style_sessions.append((path.name, rows))
+        if any(persona_of(r) in PERSONA_KEYS for r in rows):
+            persona_sessions.append((path.name, rows))
 
-    if style_sessions:
-        calibration_stability_report(style_sessions)
+    if persona_sessions:
+        calibration_stability_report(persona_sessions)
 
 
 if __name__ == "__main__":

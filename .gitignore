@@ -18,4 +18,6 @@ __pycache__/
 *.py[cod]
 prototype/.venv/
 backend/.venv/
+# 학습 산출물 (prototype/src/train_thresholds.py 가 생성)
+prototype/out/
 .pytest_cache/

@@ -66,12 +66,14 @@ class BleService : Service() {
   // 첫 윈도우가 찰 때 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
   // 저장 위치: filesDir/logs/pedal_yyyyMMdd_HHmmss.csv (권한 불필요, adb pull 로 회수)
   // 컬럼: date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,
-  //        consecutive,label,persona,trial_id,trial_type,trial_phase
+  //        consecutive,label,persona,trial_id,trial_type,trial_phase,accel_median
   //   (2026-07-17 accel_exceed 제거 + label→accel_high 교체 / 2026-07-18 label 재도입,
   //   accel_rate 추가, accel_score/armed/consecutive 추가(긴 홀드 오조작 미탐지 원인 진단용,
   //   §진행상황_및_로드맵.md 참고) / 2026-09-25 style(강/보통/약) → persona(Persona.id, 미선택 "none") 교체
   //   — 옛 CSV의 strong/normal/weak 는 각각 aggressive/normal/beginner 에 대응)
   //   / 2026-09-25 trial_id,trial_type,trial_phase 추가(안내형 재현 실험 — Trial.kt, 실험 밖이면 "none")
+  //   / 2026-09-26 accel_median 추가(윈도우 엑셀 중앙값 — accel 은 마지막 샘플 하나라 판정의 "윈도우 50% 이상
+  //   초과"와 어긋난다. 중앙값 >= 임계값이면 정확히 그 조건과 같아서 임계값 학습에 쓴다, prototype/train_thresholds.py)
   //   - 기록 주기는 200Hz 원시 샘플 전부가 아니라 **판정 윈도우 하나당 1행(4Hz)**이다.
   //     pedal_err/accel_high 가 애초에 4Hz 단위라 200Hz로 찍어도 값이 반복될 뿐이고,
   //     증거자료로서 사람이 열어볼 수 있는 크기가 더 중요하다고 판단(2026-07-13 사용자 결정,
@@ -552,7 +554,7 @@ class BleService : Service() {
       val file = java.io.File(dir, "pedal_${ts}.csv")
       java.io.BufferedWriter(java.io.FileWriter(file, true)).also {
         it.write(
-          "date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,consecutive,label,persona,trial_id,trial_type,trial_phase\n"
+          "date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,consecutive,label,persona,trial_id,trial_type,trial_phase,accel_median\n"
         )
         csvWriter = it
         Log.i(tag, "RAW 로깅 시작: ${file.absolutePath}")
@@ -655,7 +657,9 @@ class BleService : Service() {
   }
 
   // judged == null: 판정을 건너뛴 윈도우(캘리브레이션 중/전) — 판정 관련 컬럼은 "none".
-  private fun writeRawCsv(recvMs: Long, accel: Double, brake: Double, label: Int, judged: JudgeResult?) {
+  private fun writeRawCsv(
+    recvMs: Long, accel: Double, brake: Double, accelMedian: Double, label: Int, judged: JudgeResult?,
+  ) {
     synchronized(csvLock) {
       val w = ensureCsvWriterLocked() ?: return
       try {
@@ -676,7 +680,8 @@ class BleService : Service() {
             "${String.format(Locale.US, "%.4f", brake)},${String.format(Locale.US, "%.4f", accel)}," +
             "$moduleErr,$pedalErr,$accelHighStr,$accelRateStr,$accelScoreStr,$armedStr,$consecutiveStr," +
             "$label,${currentPersona?.id ?: Persona.NONE_ID}," +
-            "${currentTrialId ?: "none"},${currentTrialType ?: "none"},${currentTrialPhase ?: "none"}\n"
+            "${currentTrialId ?: "none"},${currentTrialType ?: "none"},${currentTrialPhase ?: "none"}," +
+            "${String.format(Locale.US, "%.4f", accelMedian)}\n"
         )
       } catch (e: Exception) {
         Log.e(tag, "CSV 쓰기 실패: ${e.message}")
@@ -787,7 +792,9 @@ class BleService : Service() {
       // misop/accel_exceed 는 애초에 4Hz 판정 단위라 200Hz로 찍어도 값이 반복될 뿐이고,
       // 증거자료 목적상 사람이 열어볼 수 있는 크기가 더 중요하다고 판단(2026-07-13 사용자 결정).
       val last = window.last()
-      writeRawCsv(nowMs, accel = last[0], brake = last[1], label = currentLabel, judged = judged)
+      val sortedAccels = window.map { it[0] }.sorted()
+      val accelMedian = sortedAccels[sortedAccels.size / 2]
+      writeRawCsv(nowMs, accel = last[0], brake = last[1], accelMedian = accelMedian, label = currentLabel, judged = judged)
       flushRawCsv()
     }
   }

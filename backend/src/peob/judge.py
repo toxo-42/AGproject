@@ -167,8 +167,14 @@ class MisopDetector:
 
     def step(self, samples: list[list[float]]) -> dict:
         """윈도우 하나를 판정하고 상태를 갱신. judge 결과에 armed/consecutive/fired 를 붙여 반환."""
-        result = judge_with_thresholds(samples, self.thresholds, "personalized")
+        return self.step_result(judge_with_thresholds(samples, self.thresholds, "personalized"))
 
+    def step_result(self, result: dict) -> dict:
+        """이미 계산된 윈도우 판정 결과(misop/trigger 포함)로 상태만 갱신.
+
+        step() 의 상태기계 부분. 원시 샘플 없이 CSV 행에서 misop/trigger 를 복원해 같은 상태기계를
+        다시 돌려볼 때(prototype/train_thresholds.py 의 임계값 검증) 로직을 복사하지 않고 쓰려고 분리했다.
+        """
         if result["trigger"]:
             self.armed = True
             self.gap = 0
