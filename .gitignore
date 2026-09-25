@@ -17,3 +17,5 @@ app/build/
 __pycache__/
 *.py[cod]
 prototype/.venv/
+backend/.venv/
+.pytest_cache/

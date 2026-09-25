@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 
-from features import extract_features
+from .features import extract_features
 
 # accel_high = accel_active_p90 + 이 값. §진행상황_및_로드맵.md 실험(2026-07-13) 근거.
 # 2026-07-13 재조정: 0.10 -> 0.20 (평소 범위와 슬램 사이 여유 확보, 위 모듈 docstring 참고).

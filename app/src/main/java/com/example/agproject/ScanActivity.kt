@@ -109,10 +109,16 @@ class ScanActivity : AppCompatActivity() {
   private fun connectToDevice(device: BluetoothDevice) {
     // 선택한 기기 정보를 저장하고 메인으로 돌아감
     val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
-    prefs.edit()
+    val editor = prefs.edit()
       .putString("TARGET_ADDRESS", device.address)
       .putString("TARGET_NAME", device.name ?: "Unknown")
-      .apply()
+    // 다른 모듈로 바꿔 등록하면 기존 캘리브레이션은 무효 — 센서 특성이 달라 무조건 다시 해야 한다
+    // (2026-09-24 사용자 결정). 지우면 연결 시 MainActivity 온보딩 팝업이 재캘리브레이션을 유도한다.
+    if (prefs.getString("TARGET_ADDRESS", null) != device.address) {
+      editor.remove(BleService.PREF_CALIBRATED_THRESHOLDS)
+        .remove(BleService.PREF_CALIBRATION_START_MS)
+    }
+    editor.apply()
 
     Toast.makeText(this, "${device.name} 선택됨", Toast.LENGTH_SHORT).show()
 

@@ -106,7 +106,16 @@ class DeviceManagerActivity : AppCompatActivity() {
     // 연결 해제 버튼 이벤트
     btnDisconnect.setOnClickListener {
       stopService(Intent(this, BleService::class.java))
-      prefs.edit().clear().apply()
+      // clear()로 전부 지우면 TTS 성별 등 기기와 무관한 설정까지 날아간다(2026-09-24 버그 수정).
+      // 기기 정보 + 캘리브레이션만 지운다 — 캘리브레이션은 센서 모듈 특성에도 묶여 있어
+      // 모듈이 바뀌면 무조건 다시 해야 한다(사용자 결정).
+      prefs.edit()
+        .remove("TARGET_ADDRESS")
+        .remove("TARGET_NAME")
+        .remove("CONNECTION_STATUS")
+        .remove(BleService.PREF_CALIBRATED_THRESHOLDS)
+        .remove(BleService.PREF_CALIBRATION_START_MS)
+        .apply()
       Toast.makeText(this, "기기 등록이 해제되었습니다.", Toast.LENGTH_SHORT).show()
       finish()
     }

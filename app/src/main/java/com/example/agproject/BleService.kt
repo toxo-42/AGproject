@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.chaquo.python.PyObject
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import org.json.JSONObject
@@ -42,29 +43,24 @@ class BleService : Service() {
   // RAW 샘플을 모았다가 윈도우가 차면 Python judge_json 에 통째로 넘긴다.
   // 윈도잉 책임은 Kotlin 쪽(여기). Python은 판정만 한다.
   private val sampleBuffer = ArrayList<List<Double>>(WINDOW_SIZE)
-  private var lastMisopShown = false   // 같은 오조작 연속 트리거 방지(예시)
   private var lastCnt = -1             // 직전 샘플 cnt (누락 검출용, -1 = 아직 없음)
 
-  // 급발진은 순간 스파이크가 아니라 "꾹 밟고 유지"하는 패턴이라, 윈도우 1개(0.25초)만 보고
-  // 바로 경고하면 찰나의 오조작(밟았다 바로 뗌)까지 잡아버린다. 그래서 misop=true 가 여러
-  // 윈도우 연속으로 나와야 실제 경고를 띄운다(MISOP_SUSTAIN_WINDOWS, 2026-07-13 사용자 결정).
-  private var consecutiveMisopWindows = 0
-  // 지속 카운트 도중 아주 잠깐 misop=false 로 떨어져도(센서 노이즈 등) 카운트를 바로 리셋하지
-  // 않고 봐주는 여유 구간(MISOP_GAP_TOLERANCE_WINDOWS). 이 여유를 넘겨야 실제 회복으로 본다.
-  private var misopGapWindows = 0
+  // 오조작 경고 상태기계(trigger→무장→지속시간→여유) — Python judge.MisopDetector 인스턴스.
+  // 2026-09-24 Kotlin 필드(armed/consecutive/gap/shown)에서 Python 으로 이관(Kotlin=UI,
+  // Python=판정 backend 방향). 임계값이 바뀔 때마다 applyCalibratedThresholds() 가 새로 만든다.
+  // null = 캘리브레이션 전 → 판정 안 함.
+  @Volatile private var detector: PyObject? = null
 
-  // 급조작(찰나에 확 밟음)과 서서히 깊게 밟는 정상 주행을 구분하기 위한 무장(arm) 상태
-  // (2026-07-14 사용자 결정). judge.py 의 "trigger"(엑셀 변화율 급증)가 한 번 나와야
-  // armed=true 가 되고, 그 이후에만 위 지속시간 카운트가 진행된다 — 즉 "레벨이 계속
-  // 유지되는가"는 트리거로 무장된 뒤에만 의미를 갖는다. gap tolerance 초과로 회복
-  // 판정되면 armed 도 함께 해제되어, 다음 경고를 띄우려면 트리거가 다시 발동해야 한다.
-  private var armed = false
-
-  // onPedalMisoperation() 이 실제로 호출된 그 윈도우 하나만 표시하는 1회성 플래그.
-  // judgeWindow() 가 세우고, 바로 뒤 writeRawCsv() 가 읽자마자 끈다(2026-07-17 사용자 결정
-  // — CSV의 pedal_err 는 "misop 레벨 조건이 유지되는 매 순간"이 아니라 "경고가 실제로
-  // 발동한 그 순간"만 남겨야 증거자료로서 의미가 있다는 피드백).
-  private var pedalErrorJustFired = false
+  // judgeWindow() 한 번의 결과. writeRawCsv() 가 같은 윈도우 행을 쓸 때 인자로 받는다.
+  // fired 는 onPedalMisoperation() 이 실제로 호출된 그 윈도우에서만 true(2026-07-17 사용자 결정
+  // — CSV의 pedal_err 는 "경고가 실제로 발동한 그 순간"만 남겨야 증거자료로서 의미가 있다).
+  private data class JudgeResult(
+    val score: Double,      // 레벨 조건 hits 비율 (high_ratio 와 비교)
+    val rate: Double,       // 50ms 간격 엑셀 델타 최댓값 (accel_rate_high 와 비교)
+    val armed: Boolean,
+    val consecutive: Int,
+    val fired: Boolean,
+  )
 
   // ── RAW 원시 샘플 CSV 로깅 (Phase A/E: 학습 데이터 + 증거자료) ──────────
   // 첫 윈도우가 찰 때 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
@@ -86,7 +82,7 @@ class BleService : Service() {
   //     나머지는 "none"(2026-07-17 사용자 결정). 예전엔 misop 레벨 조건이 유지되는 매 윈도우마다
   //     찍었는데, judge.py 에 변화율(미분) 트리거가 추가되면서 "완만하게 계속 깊게 밟는 상태"와
   //     "실제로 경고가 뜬 사건"이 달라졌다 — 후자만 남겨야 증거자료로서 의미가 있다.
-  //     pedalErrorJustFired 플래그로 판정한다. ⚠️ 알고리즘이 자동으로 트리거한 것이라
+  //     JudgeResult.fired 로 판정한다. ⚠️ 알고리즘이 자동으로 트리거한 것이라
   //     캘리브레이션 전(accel_high 미설정)이면 judgeWindow 가 판정 자체를 건너뛰어 항상 "none"이다
   //     — 아래 label(수동)과는 독립적인, 실시간 감지 결과일 뿐이라는 점에 주의.
   //   - accel_high: 그 순간 적용 중인 개인화 임계값(캘리브레이션 전이면 "none").
@@ -96,9 +92,9 @@ class BleService : Service() {
   //     (2026-07-18 사용자 요청 — accel_rate_high 실측 튜닝에 쓸 실제 값 분포를 보기 위함).
   //   - accel_score: 그 윈도우의 "score"(레벨 조건 hits 비율) — high_ratio와 직접 비교되는
   //     값. 스킵된 윈도우는 "none".
-  //   - armed: judgeWindow() 처리 후 그 시점의 무장 상태(§armed 필드). 인스턴스 상태를 그대로
-  //     찍는 거라 스킵된 윈도우도 직전 값이 이어진다(judgeWindow 밖에서는 안 바뀌므로 혼동 없음).
-  //   - consecutive: 그 시점의 consecutiveMisopWindows(연속 misop 윈도우 카운트).
+  //   - armed: judgeWindow() 처리 후 그 시점의 무장 상태(judge.MisopDetector). 스킵된 윈도우는
+  //     "none"(2026-09-24 상태기계 Python 이관 후 — 캘리브레이션 전/중엔 detector 자체가 없다).
+  //   - consecutive: 그 시점의 연속 misop 윈도우 카운트. 스킵된 윈도우는 "none".
   //     accel_score/armed/consecutive 셋 다 "긴 홀드형 오조작 재현이 왜 반복적으로 안 잡히는지"
   //     진단용으로 추가(2026-07-18) — 로그캣 없이 CSV만으로 무장이 언제 풀렸는지 재구성 가능.
   //   - label: 수동 오조작 라벨링(개발자용 지도학습 정답, Phase A, 0=정상/1=오조작 재현).
@@ -138,19 +134,6 @@ class BleService : Service() {
   private var lastLoggedMisop: Boolean? = null
   private var lastTextMessage: String? = null
 
-  // judge_calibrated_json 의 "rate"(윈도우 내 최대 엑셀 변화량, accel_rate_high와 직접
-  // 비교되는 값) — accel_rate_high 실측 튜닝을 위해 CSV로 노출한다(2026-07-18 사용자 요청).
-  // judgeWindow()가 스킵되는 윈도우(캘리브레이션 중/전)는 null로 둬서 "이 윈도우는 판정
-  // 자체를 안 했다"와 "판정했는데 변화가 0이었다"를 구분한다.
-  private var lastAccelRate: Double? = null
-
-  // 긴 홀드형 오조작 재현이 반복적으로 놓쳐지는 원인 진단용(2026-07-18) — "score"(레벨
-  // 조건 hits 비율, high_ratio와 직접 비교되는 값)를 CSV로 노출해, 긴 홀드 도중 레벨 조건이
-  // 실제로 끊기는지(score가 high_ratio 밑으로 떨어지는지) 로그캣 없이 CSV만으로 재구성할 수
-  // 있게 한다. armed/consecutiveMisopWindows는 이미 있는 인스턴스 필드를 그대로 CSV에 찍어서
-  // "그 순간 무장 상태였는지, 지속 카운트가 몇이었는지"까지 같이 본다.
-  private var lastMisopScore: Double? = null
-
   // ── 연속형 개인화 캘리브레이션 상태 ──────────────────────────────
   // 계산된 임계값이 있으면(null 이 아니면) judgeWindow 가 profile 대신 이걸 쓴다.
   // 이전 세션에 캘리브레이션한 값이 있으면 연결 시점에 prefs 에서 복원해 재사용한다
@@ -187,13 +170,6 @@ class BleService : Service() {
     // STM32 200Hz 원천 스트림 기준. 50샘플 = 0.25초 윈도우 (튜닝 대상)
     private const val WINDOW_SIZE = 50
 
-    // ── 오조작 지속시간 판정 (2026-07-13 사용자 결정) ────────────────────
-    // 급발진 시나리오는 엑셀을 브레이크로 착각해 "꾹 밟고 유지"하는 패턴이라, 짧은 스파이크성
-    // 오조작(밟았다 바로 뗌)과 구분하려면 misop=true 가 일정 시간 이상 연속으로 나와야 한다.
-    // 값은 전부 실측 튜닝 전 임시값 — 실제로 밟아보면서 조정할 것.
-    private const val MISOP_SUSTAIN_WINDOWS = 1       // window 1 = 0.25 sec
-    private const val MISOP_GAP_TOLERANCE_WINDOWS = 1
-
     // 로그 스로틀 주기 (수신 요약 / 판정 하트비트)
     private const val RAW_LOG_INTERVAL_MS = 5_000L
     private const val JUDGE_LOG_INTERVAL_MS = 10_000L
@@ -225,7 +201,7 @@ class BleService : Service() {
     const val ACTION_CLEAR_CALIBRATION = "ACTION_CLEAR_CALIBRATION"
     const val EXTRA_THRESHOLDS_JSON = "THRESHOLDS_JSON"
     const val PREF_CALIBRATED_THRESHOLDS = "CALIBRATED_THRESHOLDS_JSON"
-    const val CALIBRATION_DURATION_MS = 30_000L
+    const val CALIBRATION_DURATION_MS = 15_000L
 
     // 캘리브레이션 시작 시각(epoch ms) — 화면(DataCollectActivity)이 다른 앱으로 전환됐다가
     // 돌아왔을 때 "지금 캘리브레이션이 진행 중인지, 얼마나 남았는지"를 되살리는 용도(2026-07-14).
@@ -561,13 +537,20 @@ class BleService : Service() {
   private fun readCalibratedThresholds(): String? =
     getSharedPreferences("AgPrefs", MODE_PRIVATE).getString(PREF_CALIBRATED_THRESHOLDS, null)
 
-  // calibratedThresholdsJson 과 currentAccelHigh(캐시)를 항상 같이 갱신 — 따로 손대면
-  // 둘이 어긋나서 CSV의 accel_exceed 가 실제 판정 임계값과 다른 값을 쓰게 된다.
+  // calibratedThresholdsJson, currentAccelHigh(캐시), detector 를 항상 같이 갱신 — 따로 손대면
+  // CSV의 accel_high 나 판정 상태기계가 실제 임계값과 어긋난다.
+  // 임계값이 바뀌면 상태기계도 새로 만든다(이전 임계값 기준의 무장/지속 상태는 이어가지 않는다).
   private fun applyCalibratedThresholds(json: String?) {
     calibratedThresholdsJson = json
     currentAccelHigh = try {
       json?.let { JSONObject(it).getDouble("accel_high") }
     } catch (e: Exception) {
+      null
+    }
+    detector = try {
+      json?.let { Python.getInstance().getModule("peob.judge").callAttr("new_detector", it) }
+    } catch (e: Exception) {
+      Log.e(tag, "판정 상태기계 생성 실패: ${e.message}", e)
       null
     }
   }
@@ -608,7 +591,7 @@ class BleService : Service() {
       for (sample in samples) samplesJson.put(org.json.JSONArray(sample))
 
       val thresholdsJson = Python.getInstance()
-        .getModule("calibration")
+        .getModule("peob.calibration")
         .callAttr("calibrate_thresholds_json", samplesJson.toString())
         .toString()
 
@@ -632,27 +615,27 @@ class BleService : Service() {
     }
   }
 
-  private fun writeRawCsv(recvMs: Long, accel: Double, brake: Double, label: Int) {
+  // judged == null: 판정을 건너뛴 윈도우(캘리브레이션 중/전) — 판정 관련 컬럼은 "none".
+  private fun writeRawCsv(recvMs: Long, accel: Double, brake: Double, label: Int, judged: JudgeResult?) {
     synchronized(csvLock) {
       val w = ensureCsvWriterLocked() ?: return
       try {
         val d = Date(recvMs)
         // 0/1 대신 문자열로 남겨서 CSV를 열어봤을 때 바로 무슨 뜻인지 알 수 있게 한다.
         val moduleErr = if (isErrorDialogShowing) "module_err" else "none"
-        // 경고가 실제로 발동한 그 윈도우 한 행에서만 true — 읽는 즉시 꺼서 다음 행엔 안 남는다.
-        val pedalErr = if (pedalErrorJustFired) "pedal_err" else "none"
-        pedalErrorJustFired = false
+        // 경고가 실제로 발동한 그 윈도우 한 행에서만 "pedal_err".
+        val pedalErr = if (judged?.fired == true) "pedal_err" else "none"
         val accelHighNow = currentAccelHigh
         val accelHighStr = if (accelHighNow != null) String.format(Locale.US, "%.4f", accelHighNow) else "none"
-        val accelRateNow = lastAccelRate
-        val accelRateStr = if (accelRateNow != null) String.format(Locale.US, "%.4f", accelRateNow) else "none"
-        val accelScoreNow = lastMisopScore
-        val accelScoreStr = if (accelScoreNow != null) String.format(Locale.US, "%.4f", accelScoreNow) else "none"
+        val accelRateStr = judged?.let { String.format(Locale.US, "%.4f", it.rate) } ?: "none"
+        val accelScoreStr = judged?.let { String.format(Locale.US, "%.4f", it.score) } ?: "none"
+        val armedStr = judged?.armed?.toString() ?: "none"
+        val consecutiveStr = judged?.consecutive?.toString() ?: "none"
         // accel/brake 는 소수 4자리로 반올림(Q31 원본보다 촘촘할 필요 없음 → 줄 크기 안정).
         w.write(
           "${csvDateFormat.format(d)},${csvTimeFormat.format(d)}," +
             "${String.format(Locale.US, "%.4f", brake)},${String.format(Locale.US, "%.4f", accel)}," +
-            "$moduleErr,$pedalErr,$accelHighStr,$accelRateStr,$accelScoreStr,$armed,$consecutiveMisopWindows," +
+            "$moduleErr,$pedalErr,$accelHighStr,$accelRateStr,$accelScoreStr,$armedStr,$consecutiveStr," +
             "$label,$currentStyle\n"
         )
       } catch (e: Exception) {
@@ -758,101 +741,60 @@ class BleService : Service() {
     if (sampleBuffer.size >= WINDOW_SIZE) {
       val window = ArrayList(sampleBuffer)   // 복사본 전달
       sampleBuffer.clear()
-      judgeWindow(window)   // lastLoggedMisop 를 이 윈도우 결과로 갱신 — 아래 CSV 기록이 최신값을 씀
+      val judged = judgeWindow(window)
 
       // CSV는 200Hz 전부가 아니라 판정 주기(4Hz, 윈도우 하나당 1행)로만 남긴다.
       // misop/accel_exceed 는 애초에 4Hz 판정 단위라 200Hz로 찍어도 값이 반복될 뿐이고,
       // 증거자료 목적상 사람이 열어볼 수 있는 크기가 더 중요하다고 판단(2026-07-13 사용자 결정).
       val last = window.last()
-      writeRawCsv(nowMs, accel = last[0], brake = last[1], label = currentLabel)
+      writeRawCsv(nowMs, accel = last[0], brake = last[1], label = currentLabel, judged = judged)
       flushRawCsv()
     }
   }
 
-  // 윈도우 하나를 Python judge_calibrated_json 에 넘겨 오조작 여부를 판정한다.
+  // 윈도우 하나를 Python judge.MisopDetector 에 넘겨 판정하고, 경고 발동이면 알린다.
+  // 판정 규칙과 상태(무장/지속/여유)는 전부 Python 쪽에 있다 — 여기는 호출·로그·경고 표시만 한다.
   //
   // 패턴 파악(캘리브레이션) 중이거나, 아직 한 번도 캘리브레이션한 적이 없으면
-  // 판정 자체를 건너뛴다 — 그렇지 않으면 캘리브레이션 도중 세게 밟는 순간에
+  // 판정 자체를 건너뛴다(null 반환) — 그렇지 않으면 캘리브레이션 도중 세게 밟는 순간에
   // 오조작 경고가 떠서 데이터 수집이 불편해진다.
   // "임계값 미설정 = 아직 판정 안 함"이 지금 채택한 모델이다.
-  private fun judgeWindow(window: List<List<Double>>) {
-    lastAccelRate = null   // 이번 윈도우는 아직 판정 전 — 스킵되면 null(="none")로 CSV에 남는다.
-    lastMisopScore = null
-    if (isCalibrating) return
-    val calibrated = calibratedThresholdsJson ?: return
+  private fun judgeWindow(window: List<List<Double>>): JudgeResult? {
+    if (isCalibrating) return null
+    val det = detector ?: return null
 
     try {
       // 윈도우를 JSON 문자열로 직렬화해 전달 (Chaquopy ArrayList 변환 이슈 회피)
       val samplesJson = org.json.JSONArray()
       for (sample in window) samplesJson.put(org.json.JSONArray(sample))
 
-      val resultJson = Python.getInstance()
-        .getModule("judge")
-        .callAttr("judge_calibrated_json", samplesJson.toString(), calibrated)
-        .toString()
-      val result = JSONObject(resultJson)
+      val result = JSONObject(det.callAttr("step_json", samplesJson.toString()).toString())
       val misop = result.getBoolean("misop")
-      val trigger = result.getBoolean("trigger")
-      val score = result.getDouble("score")
-      val appliedLabel = result.getString("profile")   // 항상 "personalized" (judge_calibrated_json 고정값)
-      lastAccelRate = result.getDouble("rate")
-      lastMisopScore = score
-
-      // misop 결과는 lastLoggedMisop 에 남겨서 handleRawData 의 CSV 기록(같은 윈도우, 4Hz)이
-      // 방금 계산된 값을 그대로 쓴다.
+      val judged = JudgeResult(
+        score = result.getDouble("score"),
+        rate = result.getDouble("rate"),
+        armed = result.getBoolean("armed"),
+        consecutive = result.getInt("consecutive"),
+        fired = result.getBoolean("fired"),
+      )
 
       // 판정은 4Hz 로 나온다. 상태가 바뀌는 순간(정상<->오조작)은 항상 남기고,
       // 변화가 없으면 살아있다는 표시로 주기적 하트비트만 남긴다.
       val nowMs = System.currentTimeMillis()
       if (misop != lastLoggedMisop) {
-        Log.i(tag, "판정 변화: misop=$misop score=$score profile=$appliedLabel")
+        Log.i(tag, "판정 변화: misop=$misop score=${judged.score} armed=${judged.armed}")
         lastLoggedMisop = misop
         lastJudgeLogMs = nowMs
       } else if (nowMs - lastJudgeLogMs >= JUDGE_LOG_INTERVAL_MS) {
-        Log.d(tag, "판정: misop=$misop score=$score profile=$appliedLabel")
+        Log.d(tag, "판정: misop=$misop score=${judged.score} armed=${judged.armed}")
         lastJudgeLogMs = nowMs
       }
 
-      // trigger(엑셀 변화율 급증)가 한 번이라도 나오면 무장 — 이후에만 아래 지속시간
-      // 카운트가 진행된다. 트리거 없이 서서히 레벨만 올라간 경우는 애초에 카운트가
-      // 시작되지 않는다.
-      // ⚠️ 버그 수정(2026-07-18, 실측 데이터로 원인 확정): misopGapWindows는 misop=true일
-      // 때만 0으로 리셋되고, armed가 gap tolerance 초과로 해제될 때는 리셋되지 않았다.
-      // 그 결과 세션 중 한 번이라도 "무장→gap 초과→해제"가 발생하면, 그 뒤로는
-      // misopGapWindows가 문턱값 근처에 남은 채로 다음 재현이 시작돼서 새로 무장되자마자
-      // misop=false 윈도우 하나만 걸려도 즉시 재해제되는 문제가 있었다(연속 카운트가 1도
-      // 못 쌓임) — 짧게 훅 밟았다 뗀 경우 첫 윈도우의 score가 낮게 나오는 경우가 많아 실측
-      // recall이 세션마다 들쭉날쭉했던 진짜 원인. 트리거가 뜰 때마다(재무장 포함) gap
-      // 카운터도 같이 리셋해 새 무장 시도가 이전 무장의 잔여 상태에 영향받지 않게 한다.
-      if (trigger) {
-        armed = true
-        misopGapWindows = 0
-      }
-
-      // 지속시간 카운트: 무장된 상태에서 misop=true 가 여러 윈도우 연속으로 나와야
-      // 경고를 띄운다. 도중에 misop=false 가 잠깐(MISOP_GAP_TOLERANCE_WINDOWS 이내)
-      // 섞여도 카운트를 리셋하지 않고 봐준다 — 그 여유를 넘겨야 실제로 회복된 것으로 본다.
-      if (armed) {
-        if (misop) {
-          consecutiveMisopWindows++
-          misopGapWindows = 0
-        } else {
-          misopGapWindows++
-          if (misopGapWindows > MISOP_GAP_TOLERANCE_WINDOWS) {
-            consecutiveMisopWindows = 0
-            armed = false // 회복됐으니 무장 해제 — 다음 경고는 새 트리거가 있어야 다시 뜬다
-            lastMisopShown = false // 실제로 회복됐을 때만 다음 오조작을 다시 경고할 수 있게 재무장
-          }
-        }
-
-        if (consecutiveMisopWindows >= MISOP_SUSTAIN_WINDOWS && !lastMisopShown) {
-          lastMisopShown = true
-          pedalErrorJustFired = true
-          onPedalMisoperation()
-        }
-      }
+      if (judged.fired) onPedalMisoperation()
+      return judged
     } catch (e: Exception) {
       Log.e(tag, "judge 호출 실패: ${e.message}", e)
+      return null
     }
   }
 

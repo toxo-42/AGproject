@@ -42,10 +42,16 @@ android {
   }
 }
 
-// Chaquopy 설정: Python 코드는 기본 경로 src/main/python 에서 찾는다.
+// Chaquopy 설정: Python backend 원본은 저장소 최상위 backend/ 의 peob 패키지 하나뿐이다
+// (2026-09-25, app/src/main/python 복사본 폐지). Kotlin 에서는 getModule("peob.judge") 처럼 부른다.
 chaquopy {
   defaultConfig {
     version = "3.12"
+  }
+  sourceSets {
+    getByName("main") {
+      srcDir("../backend/src")
+    }
   }
 }
 

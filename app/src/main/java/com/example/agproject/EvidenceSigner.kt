@@ -21,7 +21,7 @@ import java.security.spec.ECGenParameterSpec
  * (KeyStore가 서명 연산만 대신 해주고 키 자체는 반환하지 않음). 최초 서명 시점에
  * 키가 없으면 자동 생성 — 이후엔 앱 재설치 전까지 같은 키를 계속 쓴다.
  *
- * 검증은 PC 쪽 `prototype/verify_signature.py`가 담당(공개키 + .sig + CSV로 확인).
+ * 검증은 `app/src/main/assets/verify_signature.py`(zip에 동봉)가 담당(공개키 + .sig + CSV로 확인).
  */
 object EvidenceSigner {
 

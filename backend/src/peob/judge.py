@@ -128,6 +128,84 @@ def judge_with_thresholds(samples: list[list[float]], thresholds: dict[str, floa
     }
 
 
+# ── 오조작 경고 상태기계 (2026-09-24 BleService.judgeWindow 에서 이관) ──────────────
+# 급발진 시나리오는 엑셀을 브레이크로 착각해 "꾹 밟고 유지"하는 패턴이라, 짧은 스파이크성
+# 오조작(밟았다 바로 뗌)과 구분하려면 misop=true 가 일정 시간 이상 연속으로 나와야 한다
+# (2026-07-13 사용자 결정). 값은 전부 실측 튜닝 전 임시값.
+MISOP_SUSTAIN_WINDOWS = 1        # 윈도우 1개 = 0.25초
+MISOP_GAP_TOLERANCE_WINDOWS = 1  # 지속 도중 misop=false 를 이만큼까지는 봐준다(센서 노이즈 등)
+
+
+class MisopDetector:
+    """윈도우 판정 결과를 누적해 "지금 경고를 띄울지"를 정하는 상태기계.
+
+    judge_with_thresholds() 는 윈도우 하나만 보는 순수 함수이고, 여러 윈도우에 걸친
+    상태(무장/지속/여유)는 여기서만 관리한다. 인스턴스 하나 = 세션 하나(임계값 하나).
+    Kotlin(BleService)이 임계값이 정해질 때마다 new_detector() 로 새로 만들어 보관한다
+    — 상태의 소유자가 인스턴스 하나로 명확하도록 모듈 전역 상태는 쓰지 않는다.
+
+    흐름:
+      1. trigger(엑셀 변화율 급증)가 뜨면 무장(armed). 트리거 없이 서서히 레벨만 올라간
+         경우는 애초에 카운트가 시작되지 않는다(2026-07-14 사용자 결정).
+      2. 무장 상태에서 misop=true 가 MISOP_SUSTAIN_WINDOWS 연속이면 경고 1회(fired).
+      3. misop=false 가 MISOP_GAP_TOLERANCE_WINDOWS 를 넘기면 회복으로 보고 무장 해제 —
+         다음 경고는 새 트리거가 있어야 다시 뜬다.
+
+    ⚠️ 버그 수정(2026-07-18, 실측 데이터로 원인 확정): gap 카운터는 misop=true 일 때만
+    리셋되고 무장 해제 시엔 리셋되지 않았다. 그래서 한 번 "무장→gap 초과→해제"가 일어나면
+    gap 이 문턱값 위에 남은 채로 다음 재현이 시작돼, 새로 무장되자마자 misop=false 윈도우
+    하나에 즉시 재해제됐다(짧게 훅 밟으면 첫 윈도우 score 가 낮게 나오는 경우가 많아 recall 이
+    세션마다 들쭉날쭉했던 원인). 트리거가 뜰 때마다 gap 도 같이 리셋한다.
+    """
+
+    def __init__(self, thresholds: dict[str, float]) -> None:
+        self.thresholds = thresholds
+        self.armed = False
+        self.consecutive = 0   # 무장 후 연속 misop 윈도우 수
+        self.gap = 0           # 지속 도중 연속 misop=false 윈도우 수
+        self.shown = False     # 이번 무장 구간에서 이미 경고했는가(같은 오조작 중복 경고 방지)
+
+    def step(self, samples: list[list[float]]) -> dict:
+        """윈도우 하나를 판정하고 상태를 갱신. judge 결과에 armed/consecutive/fired 를 붙여 반환."""
+        result = judge_with_thresholds(samples, self.thresholds, "personalized")
+
+        if result["trigger"]:
+            self.armed = True
+            self.gap = 0
+
+        fired = False
+        if self.armed:
+            if result["misop"]:
+                self.consecutive += 1
+                self.gap = 0
+            else:
+                self.gap += 1
+                if self.gap > MISOP_GAP_TOLERANCE_WINDOWS:
+                    self.consecutive = 0
+                    self.armed = False
+                    self.shown = False
+
+            if self.consecutive >= MISOP_SUSTAIN_WINDOWS and not self.shown:
+                self.shown = True
+                fired = True
+
+        return {**result, "armed": self.armed, "consecutive": self.consecutive, "fired": fired}
+
+    def step_json(self, samples_json: str) -> str:
+        """Chaquopy 경계용: JSON 문자열 윈도우 -> step() 결과 JSON 문자열."""
+        return json.dumps(self.step(json.loads(samples_json)), ensure_ascii=False)
+
+
+def new_detector(thresholds_json_str: str) -> MisopDetector:
+    """Chaquopy 경계용: 캘리브레이션 임계값(JSON 문자열)으로 새 상태기계를 만든다.
+
+    Kotlin 쪽:
+      val detector = py.getModule("judge").callAttr("new_detector", thresholdsJson)   // PyObject 보관
+      val resultJson = detector.callAttr("step_json", samplesJson).toString()
+    """
+    return MisopDetector(json.loads(thresholds_json_str))
+
+
 def judge(samples: list[list[float]], profile: str = DEFAULT_PROFILE) -> dict:
     """윈도우 하나를 받아 오조작 여부를 판정.
 

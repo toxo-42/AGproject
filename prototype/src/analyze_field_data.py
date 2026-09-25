@@ -25,8 +25,8 @@ import csv
 import sys
 from pathlib import Path
 
-from calibration import calibrate_thresholds
-from features import extract_features
+from peob.calibration import calibrate_thresholds
+from peob.features import extract_features
 
 STYLE_KEYS = ("weak", "normal", "strong")
 
@@ -36,8 +36,8 @@ STYLE_KEYS = ("weak", "normal", "strong")
 CSV_ROW_RATE_HZ = 4.0
 
 # label 구간 경계에서 앞뒤로 이만큼(행 수, 4Hz 기준 4행=1초)까지는 판정 지연으로 보고
-# pedal_err 매칭을 허용한다. BleService.judgeWindow() 의 지속시간 판정(MISOP_SUSTAIN_WINDOWS=2
-# + MISOP_GAP_TOLERANCE_WINDOWS=1)때문에 경고가 원시 압력 스파이크보다 최대 0.5~1초 정도
+# pedal_err 매칭을 허용한다. judge.MisopDetector 의 지속시간 판정(MISOP_SUSTAIN_WINDOWS
+# + MISOP_GAP_TOLERANCE_WINDOWS)때문에 경고가 원시 압력 스파이크보다 최대 0.5~1초 정도
 # 늦게 뜰 수 있어서, 라벨과 pedal_err를 같은 행 단위로 비교하면 안 된다(2026-07-18 실데이터에서
 # 실제로 관찰된 현상 — §대화 기록 참고). 넉넉하게 2초(8행) 잡는다.
 MATCH_TOLERANCE_ROWS = 8
