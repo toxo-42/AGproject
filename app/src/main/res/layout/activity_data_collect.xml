@@ -2,80 +2,84 @@
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-        xmlns:tools="http://schemas.android.com/tools"
-        android:layout_width="match_parent"
+    android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_dark"
-    android:padding="20dp">
-
-    <!-- 현재 압력값 (숫자) -->
+    android:background="?attr/colorSurface"
+    android:paddingHorizontal="@dimen/space_md"
+    android:paddingTop="@dimen/space_xl"
+    android:paddingBottom="@dimen/space_md">
 
     <TextView
-            android:id="@+id/tvCollectTitle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/title_data_collect"
-            android:textColor="@color/accent_blue"
-            android:textSize="24sp"
-            android:textStyle="bold"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            android:layout_marginTop="16dp"
-            android:layout_marginStart="8dp" />
+        android:id="@+id/tvCollectTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/space_sm"
+        android:text="@string/title_data_collect"
+        android:textAppearance="?attr/textAppearanceHeadlineSmall"
+        android:textColor="?attr/colorOnSurface"
+        android:textStyle="bold"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
+    <!-- 현재 압력값 (숫자) -->
     <TextView
         android:id="@+id/tvLiveValues"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="14dp"
+        android:layout_marginTop="@dimen/space_md"
+        android:background="@drawable/bg_value_field"
+        android:paddingHorizontal="@dimen/space_md"
+        android:paddingVertical="@dimen/space_sm"
         android:text="@string/live_values_idle"
-        android:textColor="@color/text_gray"
-        android:textSize="15sp"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        android:textColor="?attr/colorOnSurface"
         android:fontFamily="monospace"
         app:layout_constraintTop_toBottomOf="@id/tvCollectTitle"
         app:layout_constraintStart_toStartOf="parent" />
 
-    <!-- 실시간 그래프 (accel/brake + 임계선) -->
+    <!-- 실시간 그래프 (accel/brake + 임계선) — 카드 안에 넣어 화면 배경과 구분 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardGraph"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="@dimen/space_sm"
+        android:layout_marginBottom="@dimen/space_sm"
+        app:contentPadding="@dimen/space_sm"
+        app:layout_constraintTop_toBottomOf="@id/tvLiveValues"
+        app:layout_constraintBottom_toTopOf="@id/btnLabelMisop">
 
-    <com.example.agproject.PedalGraphView
+        <com.example.agproject.PedalGraphView
             android:id="@+id/graphPedal"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_marginTop="10dp"
-            android:background="@color/bg_dark"
-            app:layout_constraintTop_toBottomOf="@id/tvLiveValues"
-            app:layout_constraintBottom_toTopOf="@id/btnLabelMisop"
-            tools:layout_editor_absoluteX="16dp"
-            app:layout_constraintVertical_bias="0.0" />
+            android:layout_height="match_parent" />
 
-    <!-- 개발자 전용 오조작 라벨링 (AI 학습 데이터 수집) — 일반 진입 시 숨김, dev mode 에서만 표시 -->
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- 개발자 전용 오조작 라벨링 (AI 학습 데이터 수집) — 일반 진입 시 숨김, dev mode 에서만 표시.
+         배경색은 DataCollectActivity가 라벨 상태에 따라 바꾼다 -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnLabelMisop"
-        style="@style/Widget.MaterialComponents.Button"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:layout_marginBottom="8dp"
+        android:layout_height="@dimen/button_height"
+        android:layout_marginBottom="@dimen/space_sm"
         android:text="@string/btn_label_normal"
-        android:textColor="@color/text_white"
-        android:textSize="15sp"
+        android:textColor="?attr/colorOnSurface"
         android:visibility="gone"
         app:backgroundTint="@color/text_hint"
-        app:cornerRadius="12dp"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintBottom_toTopOf="@id/tvLegend" />
 
-    <!-- 연속형 개인화 캘리브레이션("패턴 파악") — 캘리브레이션 시간 동안 실주행 패턴을 모아 accel_high를 개인화 -->
     <TextView
-            android:id="@+id/tvLegend"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:text="@string/graph_legend"
-            android:textColor="@color/text_hint"
-            android:textSize="17sp"
-            app:layout_constraintBottom_toTopOf="@id/btnCalibrate"
-            tools:layout_editor_absoluteX="20dp" />
+        android:id="@+id/tvLegend"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="@dimen/space_md"
+        android:paddingHorizontal="@dimen/space_sm"
+        android:text="@string/graph_legend"
+        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        app:layout_constraintBottom_toTopOf="@id/btnCalibrate" />
 
     <!-- 개발자 전용 스타일 라벨링(강/보통/약) — 오조작 라벨과 별개로 CSV에 스타일 태그를 남긴다.
          일반 진입 시 숨김, dev mode 에서만 표시(그 대신 "패턴 파악" 버튼은 dev mode 에서 숨김). -->
@@ -96,7 +100,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:text="@string/style_strong"
-            android:textColor="@color/text_white" />
+            android:textColor="?attr/colorOnSurface" />
 
         <RadioButton
             android:id="@+id/rbStyleNormal"
@@ -104,7 +108,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:text="@string/style_normal"
-            android:textColor="@color/text_white" />
+            android:textColor="?attr/colorOnSurface" />
 
         <RadioButton
             android:id="@+id/rbStyleWeak"
@@ -112,21 +116,16 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:text="@string/style_weak"
-            android:textColor="@color/text_white" />
+            android:textColor="?attr/colorOnSurface" />
 
     </RadioGroup>
 
+    <!-- 연속형 개인화 캘리브레이션("패턴 파악") — 캘리브레이션 시간 동안 실주행 패턴을 모아 accel_high를 개인화 -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnCalibrate"
-        style="@style/Widget.MaterialComponents.Button"
         android:layout_width="0dp"
-        android:layout_height="52dp"
-        android:layout_marginBottom="10dp"
+        android:layout_height="@dimen/button_height"
         android:text="@string/btn_calibrate"
-        android:textColor="@color/text_white"
-        android:textSize="15sp"
-        app:backgroundTint="@color/accent_blue"
-        app:cornerRadius="12dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toStartOf="@id/btnResetCalibration"
@@ -135,12 +134,12 @@
     <!-- 캘리브레이션 초기화 — 삭제 후 재설치한 것처럼 되돌려 다시 패턴 파악하게 한다 -->
     <ImageButton
         android:id="@+id/btnResetCalibration"
-        android:layout_width="52dp"
-        android:layout_height="52dp"
-        android:layout_marginStart="8dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:src="@android:drawable/ic_menu_revert"
-        app:tint="@color/text_hint"
+        android:layout_width="@dimen/button_height"
+        android:layout_height="@dimen/button_height"
+        android:layout_marginStart="@dimen/space_sm"
+        android:background="@drawable/bg_value_field"
+        android:src="@drawable/ic_refresh"
+        app:tint="?attr/colorOnSurfaceVariant"
         android:contentDescription="@string/desc_reset_calibration"
         app:layout_constraintBottom_toBottomOf="@id/btnCalibrate"
         app:layout_constraintTop_toTopOf="@id/btnCalibrate"

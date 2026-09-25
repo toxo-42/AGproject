@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pretendard 중간 굵기(Medium 500 / textStyle=bold → Bold 700). 라벨·버튼·작은 제목용 (M3가 medium을 쓰는 자리) -->
+<font-family xmlns:android="http://schemas.android.com/apk/res/android"
+             xmlns:app="http://schemas.android.com/apk/res-auto">
+  <font android:fontStyle="normal" android:fontWeight="500" android:font="@font/pretendard_medium"
+        app:fontStyle="normal" app:fontWeight="500" app:font="@font/pretendard_medium" />
+  <font android:fontStyle="normal" android:fontWeight="700" android:font="@font/pretendard_bold"
+        app:fontStyle="normal" app:fontWeight="700" app:font="@font/pretendard_bold" />
+</font-family>

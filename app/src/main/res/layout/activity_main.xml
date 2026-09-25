@@ -4,8 +4,9 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_dark">
+    android:background="?attr/colorSurface">
 
+    <!-- 블러 배경 이미지 (MainActivity에서 Glide로 로드) -->
     <ImageView
         android:id="@+id/ivBackground"
         android:layout_width="match_parent"
@@ -17,126 +18,128 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <!-- 반투명 막: 배경 이미지를 은은하게만 비치게 해서 글자 가독성 확보 (투명도는 scrim_main에서 조절) -->
     <View
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="@color/bg_dark" />
+        android:background="@color/scrim_main" />
 
     <TextView
         android:id="@+id/tvAppTitle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="100dp"
-        android:layout_marginStart="24dp"
+        android:layout_marginTop="96dp"
+        android:layout_marginStart="@dimen/screen_padding"
         android:text="@string/app_title"
-        android:textColor="@color/accent_blue"
-        android:textSize="36sp"
+        android:textAppearance="?attr/textAppearanceDisplaySmall"
+        android:textColor="?attr/colorPrimary"
         android:textStyle="bold"
-        android:letterSpacing="0.1"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
 
     <TextView
+        android:id="@+id/tvAppSubtitle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:layout_marginStart="24dp"
+        android:layout_marginTop="@dimen/space_sm"
+        android:layout_marginStart="@dimen/screen_padding"
         android:text="@string/app_subtitle"
-        android:textColor="@color/text_gray"
-        android:textSize="18sp"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        android:textColor="?attr/colorOnSurfaceVariant"
         app:layout_constraintTop_toBottomOf="@id/tvAppTitle"
         app:layout_constraintStart_toStartOf="parent" />
 
+    <!-- 현재 대상 기기 카드. 테두리 색/굵기는 MainActivity가 연결 상태에 따라 바꾼다 -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/cardCurrentTarget"
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="105dp"
-        android:layout_marginHorizontal="45dp"
-        app:cardBackgroundColor="@color/bg_card"
-        app:cardCornerRadius="@dimen/card_corner_radius"
-        app:cardElevation="0dp"
-        app:strokeWidth="0dp"
-        app:strokeColor="@color/accent_blue"
-        app:layout_constraintTop_toBottomOf="@id/tvAppTitle"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintVertical_bias="0.25">
+        android:layout_marginHorizontal="@dimen/screen_padding"
+        app:strokeColor="?attr/colorPrimary"
+        app:layout_constraintTop_toBottomOf="@id/tvAppSubtitle"
+        app:layout_constraintBottom_toTopOf="@id/layoutActions"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintVertical_bias="0.4">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="55dp"
-            android:gravity="center">
+            android:paddingHorizontal="@dimen/space_lg"
+            android:paddingVertical="@dimen/space_xl"
+            android:gravity="center_horizontal">
+
+            <ImageView
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:padding="14dp"
+                android:src="@drawable/ic_bluetooth"
+                android:background="@drawable/bg_icon_circle"
+                android:backgroundTint="?attr/colorPrimaryContainer"
+                app:tint="?attr/colorOnPrimaryContainer"
+                android:importantForAccessibility="no" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
                 android:text="@string/label_current_target"
-                android:textColor="@color/text_gray"
-                android:textSize="15sp"
-                android:textStyle="bold"/>
+                android:textAppearance="?attr/textAppearanceLabelMedium"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:letterSpacing="0.12" />
 
             <TextView
                 android:id="@+id/tvTargetName"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="@dimen/space_xs"
                 android:text="@string/no_device_registered"
-                android:textColor="@color/text_white"
-                android:textSize="25sp"
-                android:textStyle="bold"/>
+                android:textAppearance="?attr/textAppearanceHeadlineSmall"
+                android:textColor="?attr/colorOnSurface"
+                android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/tvTargetAddress"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="@dimen/space_xs"
                 android:text="@string/register_prompt"
-                android:textColor="@color/text_hint"
-                android:textSize="15sp"/>
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="?attr/colorOutline" />
         </LinearLayout>
 
     </com.google.android.material.card.MaterialCardView>
 
+    <!-- 하단 동작 버튼: 주 동작(검색)은 채움, 보조 동작(관리)은 톤 버튼 -->
     <LinearLayout
-        android:layout_width="match_parent"
+        android:id="@+id/layoutActions"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="115dp"
-        android:layout_marginHorizontal="20dp"
+        android:orientation="vertical"
+        android:layout_marginHorizontal="@dimen/screen_padding"
+        android:layout_marginBottom="@dimen/space_xxl"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnGoScan"
-            android:layout_width="0dp"
-            android:layout_height="70dp"
-            android:layout_weight="1"
-            android:layout_marginEnd="8dp"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/button_height_large"
             android:text="@string/btn_scan"
-            android:textColor="#101820"
-            android:textSize="16dp"
-            android:background="@drawable/bg_mint_gradient"
-            app:backgroundTint="@null"
-            app:strokeColor="#101820"
-            app:strokeWidth="1dp"
-            app:cornerRadius="12dp" />
+            app:icon="@drawable/ic_search"
+            app:iconGravity="textStart" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnGoManager"
-            android:layout_width="0dp"
-            android:layout_height="70dp"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
+            style="@style/Widget.PeOb.Button.Tonal"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/button_height_large"
+            android:layout_marginTop="@dimen/space_sm"
             android:text="@string/btn_manage"
-            android:textColor="#101820"
-            android:textSize="15dp"
-            android:background="@drawable/bg_mint_gradient"
-            app:backgroundTint="@null"
-            app:strokeColor="#101820"
-            app:cornerRadius="12dp"/>
+            app:icon="@drawable/ic_tune"
+            app:iconGravity="textStart" />
 
     </LinearLayout>
 

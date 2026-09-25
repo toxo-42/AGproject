@@ -1,14 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg_dark">#101820</color>
-    <color name="bg_card">#1F2933</color>
-    <color name="accent_blue">#00E676</color>
+    <!-- 기존 이름 — Kotlin 코드(getColor)와 호환을 위해 유지하고, 값은 아래 M3 토큰을 따라가게 했다.
+         새 코드에서는 md_theme_* 또는 ?attr/colorXxx 를 쓴다. (accent_blue는 이름과 달리 민트) -->
+    <color name="bg_dark">@color/md_theme_surface</color>
+    <color name="bg_card">@color/md_theme_surfaceContainer</color>
+    <color name="accent_blue">@color/md_theme_primary</color>
     <color name="accent_pressed">#00C853</color>
-    <color name="text_white">#FFFFFF</color>
-    <color name="text_gray">#B0BEC5</color>
-    <color name="text_hint">#546E7A</color>
-    <color name="red_error">#FF5252</color>
-    <color name="warning_red">#A63028</color>
-    <color name="warning_button">#FFC107</color>
+    <color name="text_white">@color/md_theme_onSurface</color>
+    <color name="text_gray">@color/md_theme_onSurfaceVariant</color>
+    <color name="text_hint">@color/md_theme_outline</color>
+    <color name="red_error">@color/md_theme_error</color>
+    <color name="warning_red">@color/md_theme_errorContainer</color>
+    <color name="warning_button">@color/md_theme_tertiary</color>
+
+    <!-- 메인 화면: 블러 배경 이미지 위에 까는 반투명 막 -->
+    <color name="scrim_main">#D9101820</color>
+    <!-- 오조작 경고(CriticalActivity) 전용 — 이 화면은 구버전 MaterialComponents 테마라 ?attr 대신 직접 참조 -->
+    <color name="critical_bg">@color/md_theme_errorContainer</color>
+    <color name="critical_on_bg">#FFFFFF</color>
+    <color name="critical_button_text">#8C1D18</color>
+
+    <!-- Material 3 색 역할(role) 토큰 — 다크 전용. 위의 기존 색을 기준으로 매핑했다.
+         레이아웃/코드는 가능하면 이 토큰(또는 ?attr/colorXxx)을 참조한다. -->
+    <color name="md_theme_primary">#00E676</color>              <!-- = accent_blue (민트) -->
+    <color name="md_theme_onPrimary">#003919</color>
+    <color name="md_theme_primaryContainer">#00522A</color>
+    <color name="md_theme_onPrimaryContainer">#72FFA4</color>
+    <color name="md_theme_secondary">#40C4FF</color>            <!-- 그래프 보조선 하늘색 -->
+    <color name="md_theme_onSecondary">#00344A</color>
+    <color name="md_theme_secondaryContainer">#004C6A</color>
+    <color name="md_theme_onSecondaryContainer">#C5E7FF</color>
+    <color name="md_theme_tertiary">#FFC107</color>             <!-- = warning_button (주의/앰버) -->
+    <color name="md_theme_onTertiary">#3F2E00</color>
+    <color name="md_theme_tertiaryContainer">#5B4300</color>
+    <color name="md_theme_onTertiaryContainer">#FFDF9E</color>
+    <color name="md_theme_error">#FF5252</color>                <!-- = red_error -->
+    <color name="md_theme_onError">#690005</color>
+    <color name="md_theme_errorContainer">#A63028</color>       <!-- = warning_red (위험 배경) -->
+    <color name="md_theme_onErrorContainer">#FFDAD6</color>
+    <color name="md_theme_surface">#101820</color>              <!-- = bg_dark -->
+    <color name="md_theme_onSurface">#FFFFFF</color>            <!-- = text_white -->
+    <color name="md_theme_onSurfaceVariant">#B0BEC5</color>     <!-- = text_gray -->
+    <color name="md_theme_surfaceContainerLowest">#0B1117</color>
+    <color name="md_theme_surfaceContainerLow">#18212A</color>
+    <color name="md_theme_surfaceContainer">#1F2933</color>     <!-- = bg_card -->
+    <color name="md_theme_surfaceContainerHigh">#2A3540</color> <!-- 그래프 격자색 -->
+    <color name="md_theme_surfaceContainerHighest">#34414D</color>
+    <color name="md_theme_surfaceVariant">#2A3540</color>
+    <color name="md_theme_outline">#546E7A</color>              <!-- = text_hint -->
+    <color name="md_theme_outlineVariant">#2A3540</color>
+    <color name="md_theme_inverseSurface">#E0E6EA</color>
+    <color name="md_theme_inverseOnSurface">#101820</color>
+    <color name="md_theme_inversePrimary">#006D38</color>
 </resources>
 

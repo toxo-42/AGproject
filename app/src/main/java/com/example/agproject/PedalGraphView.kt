@@ -2,11 +2,11 @@ package com.example.agproject
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.util.AttributeSet
 import android.view.View
+import androidx.core.content.ContextCompat
 
 /**
  * 페달 압력(accel/brake) 실시간 그래프.
@@ -47,27 +47,27 @@ class PedalGraphView @JvmOverloads constructor(
   private var brakeLow = DEFAULT_BRAKE_LOW.toFloat()
 
   private val accelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = Color.parseColor("#00E676")   // accent_blue (실제로는 민트)
+    color = ContextCompat.getColor(context, R.color.md_theme_primary)
     style = Paint.Style.STROKE
     strokeWidth = 5f
   }
   private val brakePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = Color.parseColor("#40C4FF")
+    color = ContextCompat.getColor(context, R.color.md_theme_secondary)
     style = Paint.Style.STROKE
     strokeWidth = 5f
   }
   private val accelHighPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = Color.parseColor("#FF5252")
+    color = ContextCompat.getColor(context, R.color.md_theme_error)
     style = Paint.Style.STROKE
     strokeWidth = 7f
   }
   private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = Color.parseColor("#2A3540")
+    color = ContextCompat.getColor(context, R.color.md_theme_surfaceContainerHigh)
     style = Paint.Style.STROKE
     strokeWidth = 7f
   }
   private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = Color.parseColor("#546E7A")
+    color = ContextCompat.getColor(context, R.color.md_theme_outline)
     textSize = 24f
   }
 

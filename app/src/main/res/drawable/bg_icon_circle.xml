@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 아이콘 뒤 원형 배경. 색은 사용하는 곳에서 backgroundTint 로 지정 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+  <solid android:color="#FFFFFFFF" />
+</shape>

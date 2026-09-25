@@ -1,36 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 오조작 경고 화면. 매니페스트에서 구버전 Theme.MaterialComponents를 쓰므로
+     ?attr/colorXxx(M3 전용 속성) 대신 @color 를 직접 참조하고, 글꼴도 각 뷰에 직접 지정한다. -->
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#1A0000"
-    android:keepScreenOn="true">
-  <View
-      android:layout_width="match_parent"
-      android:layout_height="match_parent"
-      android:background="@color/warning_red" />
+    android:background="@color/critical_bg"
+    android:keepScreenOn="true"
+    android:paddingHorizontal="@dimen/screen_padding">
 
+  <!-- 화면 폭에 맞춰 늘어나도록 가로 기준 + 비율 고정 (원본 508x372) -->
   <ImageView
       android:id="@+id/ivCriticalIcon"
-      android:layout_width="508dp"
-      android:layout_height="372dp"
+      android:layout_width="0dp"
+      android:layout_height="0dp"
       android:src="@drawable/warning_red_blink"
+      android:importantForAccessibility="no"
+      app:layout_constraintDimensionRatio="508:372"
+      app:layout_constraintWidth_max="420dp"
       app:layout_constraintBottom_toTopOf="@+id/tvWarningTitle"
       app:layout_constraintEnd_toEndOf="parent"
       app:layout_constraintStart_toStartOf="parent"
       app:layout_constraintTop_toTopOf="parent"
-      app:layout_constraintVertical_chainStyle="packed" app:layout_constraintHorizontal_bias="0.496"/>
+      app:layout_constraintVertical_chainStyle="packed" />
+
   <TextView
       android:id="@+id/tvWarningTitle"
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
-      android:layout_marginTop="20dp"
+      android:layout_marginTop="@dimen/space_md"
       android:gravity="center"
-      android:text=" WARNING "
-      android:textColor="#FF0000"
-      android:textSize="70sp"
+      android:fontFamily="@font/pretendard"
+      android:text="WARNING"
+      android:textColor="@color/critical_on_bg"
+      android:textSize="64sp"
       android:textStyle="bold"
+      android:letterSpacing="0.08"
       app:layout_constraintBottom_toTopOf="@+id/tvWarningSub"
       app:layout_constraintEnd_toEndOf="parent"
       app:layout_constraintStart_toStartOf="parent"
@@ -40,32 +46,35 @@
       android:id="@+id/tvWarningSub"
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
-      android:layout_marginTop="20dp"
+      android:layout_marginTop="@dimen/space_md"
+      android:fontFamily="@font/pretendard"
       android:text="⚠️ 페달 오조작 감지됨!! ⚠️\n즉시 브레이크를 밟으세요."
-      android:textColor="#FFFFFF"
-      android:textSize="30sp"
+      android:textColor="@color/critical_on_bg"
+      android:textSize="28sp"
       android:textStyle="bold"
       android:gravity="center"
+      android:lineSpacingExtra="6dp"
       app:layout_constraintBottom_toTopOf="@+id/btnDismiss"
       app:layout_constraintEnd_toEndOf="parent"
       app:layout_constraintStart_toStartOf="parent"
       app:layout_constraintTop_toBottomOf="@id/tvWarningTitle" />
 
+  <!-- 해제 버튼: 빨간 배경 위에서 가장 눈에 띄도록 흰 바탕 + 진한 빨강 글씨 -->
   <com.google.android.material.button.MaterialButton
       android:id="@+id/btnDismiss"
       android:layout_width="0dp"
-      android:layout_height="80dp"
-      android:layout_marginHorizontal="20dp"
-      android:layout_marginTop="50dp"
-      android:layout_marginBottom="50dp"
-      android:backgroundTint="#D32F2F"
+      android:layout_height="88dp"
+      android:layout_marginTop="@dimen/space_xxl"
+      android:layout_marginBottom="@dimen/space_xxl"
+      android:insetTop="0dp"
+      android:insetBottom="0dp"
+      android:fontFamily="@font/pretendard"
       android:text="상황 확인 / 경고 해제"
-      android:textColor="#FFFFFF"
+      android:textColor="@color/critical_button_text"
       android:textSize="22sp"
       android:textStyle="bold"
-      app:cornerRadius="16dp"
-      app:strokeColor="#FFFFFF"
-      app:strokeWidth="2dp"
+      app:backgroundTint="@color/critical_on_bg"
+      app:cornerRadius="@dimen/corner_lg"
       app:layout_constraintBottom_toBottomOf="parent"
       app:layout_constraintEnd_toEndOf="parent"
       app:layout_constraintStart_toStartOf="parent"
