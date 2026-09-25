@@ -19,6 +19,9 @@
     <color name="critical_bg">@color/md_theme_errorContainer</color>
     <color name="critical_on_bg">#FFFFFF</color>
     <color name="critical_button_text">#8C1D18</color>
+    <!-- 경고 화면 페달 그림(PedalGuideView): 그림자 35% / 홈 55% 불투명 -->
+    <color name="critical_pedal_shadow">#59280000</color>
+    <color name="critical_pedal_groove">#8C78140F</color>
 
     <!-- Material 3 색 역할(role) 토큰 — 다크 전용. 위의 기존 색을 기준으로 매핑했다.
          레이아웃/코드는 가능하면 이 토큰(또는 ?attr/colorXxx)을 참조한다. -->

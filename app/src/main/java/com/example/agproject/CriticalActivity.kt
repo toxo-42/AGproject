@@ -3,9 +3,7 @@ package com.example.agproject
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
-import android.widget.ImageView
 import androidx.appcompat.app.AppCompatActivity
-import com.bumptech.glide.Glide
 import com.google.android.material.button.MaterialButton
 
 class CriticalActivity : AppCompatActivity() {
@@ -17,16 +15,10 @@ class CriticalActivity : AppCompatActivity() {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_critical)
 
-    // 2. UI 연결
-    val ivCriticalIcon = findViewById<ImageView>(R.id.ivCriticalIcon)
+    // 2. UI 연결 (경고 애니메이션은 PedalGuideView 가 스스로 그린다)
     val btnDismiss = findViewById<MaterialButton>(R.id.btnDismiss)
 
-    // 3. 경고 움짤(WebP) 재생 (Glide 사용)
-    Glide.with(this)
-      .load(R.drawable.warning_red_blink) // 준비한 이미지 파일
-      .into(ivCriticalIcon)
-
-    // 4. 확인 버튼 누르면 -> 화면 끄기
+    // 3. 확인 버튼 누르면 -> 화면 끄기
     btnDismiss.setOnClickListener {
       finish() // 액티비티 종료
     }

@@ -10,14 +10,14 @@
     android:keepScreenOn="true"
     android:paddingHorizontal="@dimen/screen_padding">
 
-  <!-- 화면 폭에 맞춰 늘어나도록 가로 기준 + 비율 고정 (원본 508x372) -->
-  <ImageView
-      android:id="@+id/ivCriticalIcon"
+  <!-- 절차적 애니메이션: 엑셀(떨림·발광) → 화살표 → 브레이크(숨쉬기·음파 링). 코드로 그리므로
+       해상도 무관. 화면 폭에 맞춰 늘어나도록 가로 기준 + 논리 좌표계 비율(312:229) 고정 -->
+  <com.example.agproject.PedalGuideView
+      android:id="@+id/viewPedalGuide"
       android:layout_width="0dp"
       android:layout_height="0dp"
-      android:src="@drawable/warning_red_blink"
       android:importantForAccessibility="no"
-      app:layout_constraintDimensionRatio="508:372"
+      app:layout_constraintDimensionRatio="312:229"
       app:layout_constraintWidth_max="420dp"
       app:layout_constraintBottom_toTopOf="@+id/tvWarningTitle"
       app:layout_constraintEnd_toEndOf="parent"
@@ -40,7 +40,7 @@
       app:layout_constraintBottom_toTopOf="@+id/tvWarningSub"
       app:layout_constraintEnd_toEndOf="parent"
       app:layout_constraintStart_toStartOf="parent"
-      app:layout_constraintTop_toBottomOf="@id/ivCriticalIcon" />
+      app:layout_constraintTop_toBottomOf="@id/viewPedalGuide" />
 
   <TextView
       android:id="@+id/tvWarningSub"

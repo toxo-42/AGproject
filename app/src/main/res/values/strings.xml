@@ -75,4 +75,7 @@
   <string name="title_calibration_onboarding">패턴 파악이 필요합니다</string>
   <string name="msg_calibration_onboarding">아직 이 기기에서 운전 습관을 파악한 적이 없습니다.\n페달 오조작 감지가 동작하려면 먼저 패턴 파악이 필요합니다.</string>
   <string name="btn_calibration_onboarding_start">지금 패턴 파악하기</string>
+  <!-- 오조작 경고 화면 페달 그림(PedalGuideView) 라벨 -->
+  <string name="critical_label_brake">BRAKE</string>
+  <string name="critical_label_accel">ACCEL</string>
 </resources>
