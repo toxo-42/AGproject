@@ -57,6 +57,7 @@
 
         <activity android:name=".DeviceManagerActivity" />
         <activity android:name=".DataCollectActivity" />
+        <activity android:name=".TrialActivity" />
 
         <service
             android:name=".BleService"

@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 안내형 재현 실험(개발자 전용, 정차 중). 설정 → 진행 → 요약 세 구간을 TrialActivity 가 번갈아 보인다.
+     실험 중 화면이 꺼지면 중단되므로 keepScreenOn -->
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/colorSurface"
+    android:keepScreenOn="true"
+    android:paddingHorizontal="@dimen/screen_padding"
+    android:paddingTop="@dimen/space_xl"
+    android:paddingBottom="@dimen/space_lg">
+
+  <!-- ① 설정: 실험 종류 · 횟수 -->
+  <LinearLayout
+      android:id="@+id/layoutSetup"
+      android:layout_width="match_parent"
+      android:layout_height="match_parent"
+      android:orientation="vertical">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/title_trial"
+        android:textAppearance="?attr/textAppearanceHeadlineSmall"
+        android:textColor="?attr/colorOnSurface"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvPersona"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_xs"
+        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:textColor="?attr/colorOnSurfaceVariant" />
+
+    <!-- 칩은 TrialActivity 가 TrialType 목록으로 채운다 -->
+    <com.google.android.material.chip.ChipGroup
+        android:id="@+id/chipGroupType"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_lg"
+        app:singleSelection="true"
+        app:selectionRequired="true" />
+
+    <com.google.android.material.card.MaterialCardView
+        style="@style/Widget.PeOb.Card.Compact"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_md"
+        app:contentPadding="@dimen/space_md">
+
+      <LinearLayout
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvTypeLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.PeOb.FieldLabel" />
+
+        <TextView
+            android:id="@+id/tvTypeDesc"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_xs"
+            android:textAppearance="?attr/textAppearanceBodyLarge"
+            android:textColor="?attr/colorOnSurface" />
+      </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- 횟수 조절 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_lg"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+      <com.google.android.material.button.MaterialButton
+          android:id="@+id/btnRepsMinus"
+          style="@style/Widget.PeOb.Button.Tonal"
+          android:layout_width="@dimen/button_height"
+          android:layout_height="@dimen/button_height"
+          android:padding="0dp"
+          android:text="−" />
+
+      <TextView
+          android:id="@+id/tvReps"
+          android:layout_width="120dp"
+          android:layout_height="wrap_content"
+          android:gravity="center"
+          android:textAppearance="?attr/textAppearanceHeadlineSmall"
+          android:textColor="?attr/colorOnSurface"
+          android:textStyle="bold" />
+
+      <com.google.android.material.button.MaterialButton
+          android:id="@+id/btnRepsPlus"
+          style="@style/Widget.PeOb.Button.Tonal"
+          android:layout_width="@dimen/button_height"
+          android:layout_height="@dimen/button_height"
+          android:padding="0dp"
+          android:text="+" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnStart"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/button_height_large"
+        android:text="@string/btn_trial_start"
+        app:icon="@drawable/ic_play"
+        app:iconGravity="textStart" />
+  </LinearLayout>
+
+  <!-- ② 진행: 큰 글씨 안내 + 카운트다운 -->
+  <LinearLayout
+      android:id="@+id/layoutRun"
+      android:layout_width="match_parent"
+      android:layout_height="match_parent"
+      android:gravity="center_horizontal"
+      android:orientation="vertical"
+      android:visibility="gone">
+
+    <TextView
+        android:id="@+id/tvProgress"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        android:textColor="?attr/colorOnSurfaceVariant" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <TextView
+        android:id="@+id/tvPhase"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textAppearance="?attr/textAppearanceDisplayMedium"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvCountdown"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_md"
+        android:textAppearance="?attr/textAppearanceDisplayLarge"
+        android:textColor="?attr/colorOnSurface"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvInstruction"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_lg"
+        android:gravity="center"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        android:textColor="?attr/colorOnSurfaceVariant" />
+
+    <!-- 이번 회차에서 판정이 발동했으면 표시 -->
+    <TextView
+        android:id="@+id/tvDetected"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_lg"
+        android:background="@drawable/bg_pill"
+        android:backgroundTint="?attr/colorPrimaryContainer"
+        android:paddingHorizontal="@dimen/space_md"
+        android:paddingVertical="6dp"
+        android:text="@string/trial_detected_now"
+        android:textAppearance="?attr/textAppearanceLabelLarge"
+        android:textColor="?attr/colorOnPrimaryContainer"
+        android:visibility="invisible" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnStop"
+        style="@style/Widget.PeOb.Button.Outlined.Danger"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/button_height"
+        android:text="@string/btn_trial_stop"
+        app:icon="@drawable/ic_stop"
+        app:iconGravity="textStart" />
+  </LinearLayout>
+
+  <!-- ③ 요약: 감지/오탐 회차 -->
+  <LinearLayout
+      android:id="@+id/layoutSummary"
+      android:layout_width="match_parent"
+      android:layout_height="match_parent"
+      android:gravity="center_horizontal"
+      android:orientation="vertical"
+      android:visibility="gone">
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <TextView
+        android:id="@+id/tvSummaryType"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        android:textColor="?attr/colorOnSurfaceVariant" />
+
+    <TextView
+        android:id="@+id/tvSummary"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_sm"
+        android:gravity="center"
+        android:textAppearance="?attr/textAppearanceHeadlineMedium"
+        android:textColor="?attr/colorOnSurface"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvSummaryDetail"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_md"
+        android:gravity="center"
+        android:textAppearance="?attr/textAppearanceBodyLarge"
+        android:textColor="?attr/colorOnSurfaceVariant" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnAgain"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/button_height_large"
+        android:text="@string/btn_trial_again" />
+  </LinearLayout>
+
+</FrameLayout>

@@ -59,7 +59,7 @@
         android:layout_marginBottom="@dimen/space_sm"
         app:contentPadding="@dimen/space_sm"
         app:layout_constraintTop_toBottomOf="@id/tvLiveValues"
-        app:layout_constraintBottom_toTopOf="@id/btnLabelMisop">
+        app:layout_constraintBottom_toTopOf="@id/btnOpenTrial">
 
         <com.example.agproject.PedalGraphView
             android:id="@+id/graphPedal"
@@ -68,17 +68,17 @@
 
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- 개발자 전용 오조작 라벨링 (AI 학습 데이터 수집) — 일반 진입 시 숨김, dev mode 에서만 표시.
-         배경색은 DataCollectActivity가 라벨 상태에 따라 바꾼다 -->
+    <!-- 개발자 전용 안내형 재현 실험 진입(오조작 라벨 자동 기록) — 일반 진입 시 숨김, dev mode 에서만 표시 -->
     <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnLabelMisop"
+        android:id="@+id/btnOpenTrial"
+        style="@style/Widget.PeOb.Button.Tonal"
         android:layout_width="match_parent"
         android:layout_height="@dimen/button_height"
         android:layout_marginBottom="@dimen/space_sm"
-        android:text="@string/btn_label_normal"
-        android:textColor="?attr/colorOnSurface"
+        android:text="@string/btn_open_trial"
         android:visibility="gone"
-        app:backgroundTint="@color/text_hint"
+        app:icon="@drawable/ic_play"
+        app:iconGravity="textStart"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintBottom_toTopOf="@id/tvLegend" />

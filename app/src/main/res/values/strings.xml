@@ -17,6 +17,36 @@
   <string name="label_persona">페르소나 (개발자)</string>
   <string name="title_data_collect_persona">%1$s · %2$s</string>
 
+  <!-- 안내형 재현 실험 (TrialActivity, 개발자 전용) -->
+  <string name="btn_open_trial">재현 실험 (정차 중)</string>
+  <string name="title_trial">재현 실험</string>
+  <string name="trial_panic_slam">패닉 급밟기</string>
+  <string name="trial_panic_slam_desc">브레이크인 줄 알고 엑셀을 콱 밟은 채 유지하세요</string>
+  <string name="trial_hard_normal">세게 정상 가속</string>
+  <string name="trial_hard_normal_desc">추월하듯 빠르게 세게 밟았다가 자연스럽게 떼세요</string>
+  <string name="trial_slow_deep">천천히 깊게</string>
+  <string name="trial_slow_deep_desc">천천히 끝까지 깊게 밟아 유지하세요</string>
+  <string name="trial_free_act">자유 조작</string>
+  <string name="trial_free_act_desc">선택한 페르소나답게 평소 운전하듯 자유롭게 조작하세요</string>
+  <string name="trial_reps">%1$d회</string>
+  <string name="trial_label_misop">오조작(label=1)</string>
+  <string name="trial_label_normal">정상(label=0)</string>
+  <string name="btn_trial_start">실험 시작</string>
+  <string name="btn_trial_stop">중단</string>
+  <string name="trial_phase_ready">준비</string>
+  <string name="trial_phase_action">밟으세요!</string>
+  <string name="trial_phase_rest">떼고 쉬세요</string>
+  <string name="trial_progress">%1$d / %2$d회</string>
+  <string name="trial_detected_now">감지됨</string>
+  <string name="trial_summary_misop">%1$d회 중 %2$d회 감지</string>
+  <string name="trial_summary_normal">%1$d회 중 %2$d회 오탐</string>
+  <string name="trial_summary_missed">놓친 회차: %1$s</string>
+  <string name="trial_summary_detection_off">판정 꺼짐(페르소나·패턴 파악 없음) — 감지 요약 없음</string>
+  <string name="trial_need_monitoring">감시가 켜져 있고 연결된 상태(감시 중)에서만 시작할 수 있어요</string>
+  <string name="trial_aborted">실험을 중단했어요 — 여기까지 기록됨</string>
+  <string name="trial_persona_line">페르소나 · %1$s</string>
+  <string name="btn_trial_again">다른 실험 하기</string>
+
   <!-- 메인 화면 감시 상태 (MonitorState) -->
   <string name="monitor_no_device">기기 미등록</string>
   <string name="monitor_stopped">꺼짐</string>
@@ -74,10 +104,8 @@
   <string name="btn_delete_confirm">삭제</string>
   <string name="msg_delete_done">삭제했습니다</string>
 
-  <!-- 개발자 전용 오조작 라벨링 (AI 학습 데이터 수집, 데이터 수집 버튼 길게 눌러 진입) -->
-  <string name="msg_dev_mode_entered">개발자 모드: 오조작 라벨링</string>
-  <string name="btn_label_normal">○ 정상</string>
-  <string name="btn_label_misop">● 오조작 기록 중</string>
+  <!-- 개발자 전용 학습 데이터 수집 (데이터 수집 버튼 길게 눌러 진입) -->
+  <string name="msg_dev_mode_entered">개발자 모드: 학습 데이터 수집</string>
 
   <!-- 연속형 개인화 캘리브레이션(Phase B "패턴 파악") -->
   <string name="btn_calibrate">패턴 파악 시작 </string>

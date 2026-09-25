@@ -66,11 +66,12 @@ class BleService : Service() {
   // 첫 윈도우가 찰 때 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
   // 저장 위치: filesDir/logs/pedal_yyyyMMdd_HHmmss.csv (권한 불필요, adb pull 로 회수)
   // 컬럼: date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,
-  //        consecutive,label,persona
+  //        consecutive,label,persona,trial_id,trial_type,trial_phase
   //   (2026-07-17 accel_exceed 제거 + label→accel_high 교체 / 2026-07-18 label 재도입,
   //   accel_rate 추가, accel_score/armed/consecutive 추가(긴 홀드 오조작 미탐지 원인 진단용,
   //   §진행상황_및_로드맵.md 참고) / 2026-09-25 style(강/보통/약) → persona(Persona.id, 미선택 "none") 교체
   //   — 옛 CSV의 strong/normal/weak 는 각각 aggressive/normal/beginner 에 대응)
+  //   / 2026-09-25 trial_id,trial_type,trial_phase 추가(안내형 재현 실험 — Trial.kt, 실험 밖이면 "none")
   //   - 기록 주기는 200Hz 원시 샘플 전부가 아니라 **판정 윈도우 하나당 1행(4Hz)**이다.
   //     pedal_err/accel_high 가 애초에 4Hz 단위라 200Hz로 찍어도 값이 반복될 뿐이고,
   //     증거자료로서 사람이 열어볼 수 있는 크기가 더 중요하다고 판단(2026-07-13 사용자 결정,
@@ -114,9 +115,15 @@ class BleService : Service() {
   private val csvTimeFormat = java.text.SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
   // ── 라벨링 (Phase A: 지도학습용 정답 수집) ────────────────────────
-  // MainActivity 의 '오조작' 토글이 ACTION_SET_LABEL 로 갱신한다.
+  // 개발자 재현 실험 화면(TrialActivity)이 ACTION_SET_TRIAL 로 구간마다 갱신한다(수동 토글은 2026-09-25 대체).
   // BLE 콜백 스레드가 읽고 UI 스레드가 쓰므로 @Volatile 필요.
   @Volatile private var currentLabel = LABEL_NORMAL
+
+  // 진행 중인 재현 실험 회차/종류/구간 — 실험 밖이면 null. CSV 에 그대로 찍히고,
+  // 실험 중 경고가 발동하면 전체화면 경고 대신 ACTION_TRIAL_FIRED 로 실험 화면에만 알린다.
+  @Volatile private var currentTrialId: String? = null
+  @Volatile private var currentTrialType: String? = null
+  @Volatile private var currentTrialPhase: String? = null
 
   // 개발자 데이터 수집 페르소나(null = 사용자 본인) — 고르면 그 프리셋으로 판정하고, CSV persona 컬럼에 찍는다.
   // 감시 시작 시 prefs 에서 읽고, 개발자 수집 화면에서 바꾸면 ACTION_SET_PERSONA 로 다시 읽는다.
@@ -185,10 +192,15 @@ class BleService : Service() {
     private const val RAW_LOG_INTERVAL_MS = 5_000L
     private const val JUDGE_LOG_INTERVAL_MS = 10_000L
 
-    // ── 라벨링/프로필 (Phase A) ─────────────────────────────────────
-    // MainActivity 가 오조작 토글을 누를 때 보내는 인텐트.
-    const val ACTION_SET_LABEL = "ACTION_SET_LABEL"
+    // ── 라벨링/재현 실험 (Phase A) ──────────────────────────────────
+    // 실험 화면이 구간(준비/조작/휴식)이 바뀔 때마다 보낸다. EXTRA_TRIAL_ID 가 없으면 실험 종료.
+    const val ACTION_SET_TRIAL = "ACTION_SET_TRIAL"
+    const val EXTRA_TRIAL_ID = "TRIAL_ID"
+    const val EXTRA_TRIAL_TYPE = "TRIAL_TYPE"
+    const val EXTRA_TRIAL_PHASE = "TRIAL_PHASE"
     const val EXTRA_LABEL = "LABEL"
+    // 실험 중 경고가 발동하면 보낸다(EXTRA_TRIAL_ID = 그때의 회차) — 실험 화면이 감지 회차를 센다.
+    const val ACTION_TRIAL_FIRED = "ACTION_TRIAL_FIRED"
 
     const val LABEL_NORMAL = 0   // 정상 주행 구간
     const val LABEL_MISOP = 1    // 오조작 재현 구간
@@ -253,14 +265,14 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
-    // 오조작 라벨 토글. 이후 기록되는 CSV 행의 label 컬럼이 이 값으로 찍힌다.
-    if (intent?.action == ACTION_SET_LABEL) {
-      currentLabel = if (intent.getIntExtra(EXTRA_LABEL, LABEL_NORMAL) == LABEL_MISOP) {
-        LABEL_MISOP
-      } else {
-        LABEL_NORMAL
-      }
-      Log.i(tag, "라벨 변경: label=$currentLabel (${if (currentLabel == LABEL_MISOP) "오조작" else "정상"})")
+    // 재현 실험 구간 변경. 이후 기록되는 CSV 행의 label/trial_* 컬럼이 이 값으로 찍힌다.
+    if (intent?.action == ACTION_SET_TRIAL) {
+      currentTrialId = intent.getStringExtra(EXTRA_TRIAL_ID)
+      val active = currentTrialId != null
+      currentTrialType = if (active) intent.getStringExtra(EXTRA_TRIAL_TYPE) else null
+      currentTrialPhase = if (active) intent.getStringExtra(EXTRA_TRIAL_PHASE) else null
+      currentLabel = if (active && intent.getIntExtra(EXTRA_LABEL, LABEL_NORMAL) == LABEL_MISOP) LABEL_MISOP else LABEL_NORMAL
+      Log.i(tag, "실험 구간: id=$currentTrialId type=$currentTrialType phase=$currentTrialPhase label=$currentLabel")
       return START_NOT_STICKY
     }
 
@@ -540,7 +552,7 @@ class BleService : Service() {
       val file = java.io.File(dir, "pedal_${ts}.csv")
       java.io.BufferedWriter(java.io.FileWriter(file, true)).also {
         it.write(
-          "date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,consecutive,label,persona\n"
+          "date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,consecutive,label,persona,trial_id,trial_type,trial_phase\n"
         )
         csvWriter = it
         Log.i(tag, "RAW 로깅 시작: ${file.absolutePath}")
@@ -663,7 +675,8 @@ class BleService : Service() {
           "${csvDateFormat.format(d)},${csvTimeFormat.format(d)}," +
             "${String.format(Locale.US, "%.4f", brake)},${String.format(Locale.US, "%.4f", accel)}," +
             "$moduleErr,$pedalErr,$accelHighStr,$accelRateStr,$accelScoreStr,$armedStr,$consecutiveStr," +
-            "$label,${currentPersona?.id ?: Persona.NONE_ID}\n"
+            "$label,${currentPersona?.id ?: Persona.NONE_ID}," +
+            "${currentTrialId ?: "none"},${currentTrialType ?: "none"},${currentTrialPhase ?: "none"}\n"
         )
       } catch (e: Exception) {
         Log.e(tag, "CSV 쓰기 실패: ${e.message}")
@@ -817,7 +830,19 @@ class BleService : Service() {
         lastJudgeLogMs = nowMs
       }
 
-      if (judged.fired) onPedalMisoperation()
+      if (judged.fired) {
+        // 재현 실험 중엔 매 회차 전체화면 경고가 뜨면 실험이 끊긴다 — 실험 화면에만 알리고 CSV 에 남긴다.
+        val trialId = currentTrialId
+        if (trialId != null) {
+          Log.i(tag, "실험 중 경고 발동(표시 생략): trial=$trialId")
+          sendBroadcast(Intent(ACTION_TRIAL_FIRED).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_TRIAL_ID, trialId)
+          })
+        } else {
+          onPedalMisoperation()
+        }
+      }
       return judged
     } catch (e: Exception) {
       Log.e(tag, "judge 호출 실패: ${e.message}", e)

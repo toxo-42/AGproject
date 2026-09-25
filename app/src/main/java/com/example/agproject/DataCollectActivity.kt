@@ -33,12 +33,10 @@ class DataCollectActivity : AppCompatActivity() {
   private lateinit var tvLiveValues: TextView
   private lateinit var btnCalibrate: MaterialButton
   private lateinit var btnResetCalibration: ImageButton
-  private lateinit var btnLabelMisop: MaterialButton
   private lateinit var tvCollectTitle: TextView
 
   private var calibrationTimer: CountDownTimer? = null
   private var devMode = false
-  private var labelingMisop = false
 
   // 화면 갱신은 BLE 배치(50Hz)마다 오지만, 숫자 텍스트까지 50Hz 로 바꾸면
   // 읽을 수가 없다. 그래프만 매번 갱신하고 텍스트는 100ms 마다.
@@ -82,7 +80,6 @@ class DataCollectActivity : AppCompatActivity() {
     tvLiveValues = findViewById(R.id.tvLiveValues)
     btnCalibrate = findViewById(R.id.btnCalibrate)
     btnResetCalibration = findViewById(R.id.btnResetCalibration)
-    btnLabelMisop = findViewById(R.id.btnLabelMisop)
     tvCollectTitle = findViewById(R.id.tvCollectTitle)
 
     btnCalibrate.setOnClickListener { startCalibrationFlow() }
@@ -90,11 +87,14 @@ class DataCollectActivity : AppCompatActivity() {
 
     devMode = intent.getBooleanExtra(EXTRA_DEV_MODE, false)
     if (devMode) {
-      // dev mode: 페르소나 선택 + 오조작 라벨 토글을 보인다. 페르소나를 고르면 프리셋 임계값을 쓰므로
+      // dev mode: 페르소나 선택 + 재현 실험 버튼을 보인다. 페르소나를 고르면 프리셋 임계값을 쓰므로
       // 패턴 파악 버튼은 숨긴다("없음"일 때만 보임 — applyPersonaUi 참고).
       setupPersonaToggle()
-      btnLabelMisop.visibility = android.view.View.VISIBLE
-      btnLabelMisop.setOnClickListener { toggleMisopLabel() }
+      // 오조작 라벨은 수동 토글 대신 안내형 재현 실험(TrialActivity)이 구간마다 자동으로 찍는다
+      findViewById<MaterialButton>(R.id.btnOpenTrial).apply {
+        visibility = android.view.View.VISIBLE
+        setOnClickListener { startActivity(Intent(this@DataCollectActivity, TrialActivity::class.java)) }
+      }
     }
 
     // 그래프에 기존 캘리브레이션 값 반영은 onResume()에서 항상 수행한다(재진입 시 재동기화 포함).
@@ -127,8 +127,6 @@ class DataCollectActivity : AppCompatActivity() {
     super.onPause()
     // 화면을 벗어나면 50Hz 브로드캐스트를 끈다.
     setLiveStream(false)
-    // 라벨링 중이었다면 다음 세션에 새지 않도록 정상/미설정으로 되돌린다.
-    if (devMode && labelingMisop) setMisopLabel(false)
     // 캘리브레이션 자체는 BleService 안에서 화면과 무관하게 계속 진행된다 —
     // 여기서 취소하는 건 화면에 남은 카운트다운 UI뿐.
     calibrationTimer?.cancel()
@@ -149,29 +147,6 @@ class DataCollectActivity : AppCompatActivity() {
   }
 
   // --- 개발자 전용 오조작 라벨링 (AI 학습 데이터 수집) ---
-
-  private fun toggleMisopLabel() {
-    setMisopLabel(!labelingMisop)
-  }
-
-  private fun setMisopLabel(misop: Boolean) {
-    labelingMisop = misop
-    startService(Intent(this, BleService::class.java).apply {
-      action = BleService.ACTION_SET_LABEL
-      putExtra(BleService.EXTRA_LABEL, if (misop) BleService.LABEL_MISOP else BleService.LABEL_NORMAL)
-    })
-    if (misop) {
-      btnLabelMisop.setText(R.string.btn_label_misop)
-      btnLabelMisop.backgroundTintList = android.content.res.ColorStateList.valueOf(
-        androidx.core.content.ContextCompat.getColor(this, R.color.red_error)
-      )
-    } else {
-      btnLabelMisop.setText(R.string.btn_label_normal)
-      btnLabelMisop.backgroundTintList = android.content.res.ColorStateList.valueOf(
-        androidx.core.content.ContextCompat.getColor(this, R.color.text_hint)
-      )
-    }
-  }
 
   // --- 개발자 페르소나 ---
 
