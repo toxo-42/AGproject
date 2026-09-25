@@ -66,10 +66,11 @@ class BleService : Service() {
   // 첫 윈도우가 찰 때 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
   // 저장 위치: filesDir/logs/pedal_yyyyMMdd_HHmmss.csv (권한 불필요, adb pull 로 회수)
   // 컬럼: date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,
-  //        consecutive,label,style
+  //        consecutive,label,persona
   //   (2026-07-17 accel_exceed 제거 + label→accel_high 교체 / 2026-07-18 label 재도입,
   //   accel_rate 추가, accel_score/armed/consecutive 추가(긴 홀드 오조작 미탐지 원인 진단용,
-  //   §진행상황_및_로드맵.md 참고) — 아래 참고)
+  //   §진행상황_및_로드맵.md 참고) / 2026-09-25 style(강/보통/약) → persona(Persona.id, 미선택 "none") 교체
+  //   — 옛 CSV의 strong/normal/weak 는 각각 aggressive/normal/beginner 에 대응)
   //   - 기록 주기는 200Hz 원시 샘플 전부가 아니라 **판정 윈도우 하나당 1행(4Hz)**이다.
   //     pedal_err/accel_high 가 애초에 4Hz 단위라 200Hz로 찍어도 값이 반복될 뿐이고,
   //     증거자료로서 사람이 열어볼 수 있는 크기가 더 중요하다고 판단(2026-07-13 사용자 결정,
@@ -117,9 +118,12 @@ class BleService : Service() {
   // BLE 콜백 스레드가 읽고 UI 스레드가 쓰므로 @Volatile 필요.
   @Volatile private var currentLabel = LABEL_NORMAL
 
-  // 개발자 전용 스타일 라벨링(강/보통/약) — 오조작 라벨과 별개로, CSV 행마다 "지금 어떤
-  // 스타일로 밟는 중인가"를 남긴다. DataCollectActivity 의 개발자 모드에서만 노출된다.
-  @Volatile private var currentStyle = STYLE_UNSET
+  // 개발자 데이터 수집 페르소나(null = 사용자 본인) — 그 캘리브레이션으로 판정하고, CSV persona 컬럼에 찍는다.
+  // 감시 시작 시 prefs 에서 읽고, 개발자 수집 화면에서 바꾸면 ACTION_SET_PERSONA 로 다시 읽는다.
+  @Volatile private var currentPersona: Persona? = null
+
+  // 캘리브레이션을 시작한 페르소나 — 도중에 바꿔도 결과는 시작한 쪽 몫으로 저장한다.
+  private var calibrationPersona: Persona? = null
 
   // 수집 화면이 떠 있는 동안만 true. BLE 콜백 스레드가 읽고 메인 스레드가 쓴다.
   @Volatile private var liveStreamEnabled = false
@@ -192,15 +196,8 @@ class BleService : Service() {
     const val LABEL_NORMAL = 0   // 정상 주행 구간
     const val LABEL_MISOP = 1    // 오조작 재현 구간
 
-    // 개발자 전용 스타일 라벨링(강/보통/약) — 로지스틱 회귀 feature 비교용 원시 데이터에
-    // 태그를 남긴다. 실시간 판정(임계값)에는 전혀 영향을 주지 않는다(캘리브레이션과 무관).
-    const val ACTION_SET_STYLE = "ACTION_SET_STYLE"
-    const val EXTRA_STYLE = "STYLE"
-
-    const val STYLE_UNSET = "unset"
-    const val STYLE_STRONG = "strong"
-    const val STYLE_NORMAL = "normal"
-    const val STYLE_WEAK = "weak"
+    // 개발자 페르소나 변경 알림 — 선택값은 CalibrationPrefs 에 이미 저장된 상태로 보낸다(서비스는 다시 읽기만).
+    const val ACTION_SET_PERSONA = "ACTION_SET_PERSONA"
 
     // ── 연속형 개인화 캘리브레이션 (Phase B, calibration.py 대응) ──────────
     // 3단계 프로필(discrete) 방식은 실측에서 경계가 불안정해 폐기했다(§진행상황_및_로드맵.md
@@ -210,7 +207,7 @@ class BleService : Service() {
     const val ACTION_CALIBRATION_DONE = "ACTION_CALIBRATION_DONE"
     const val ACTION_CLEAR_CALIBRATION = "ACTION_CLEAR_CALIBRATION"
     const val EXTRA_THRESHOLDS_JSON = "THRESHOLDS_JSON"
-    const val PREF_CALIBRATED_THRESHOLDS = "CALIBRATED_THRESHOLDS_JSON"
+    // 캘리브레이션 값 자체는 사용자/페르소나별로 CalibrationPrefs 가 저장한다.
     const val CALIBRATION_DURATION_MS = 15_000L
 
     // 캘리브레이션 시작 시각(epoch ms) — 화면(DataCollectActivity)이 다른 앱으로 전환됐다가
@@ -270,10 +267,11 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
-    // 개발자 전용 스타일 라벨 토글(강/보통/약). 이후 기록되는 CSV 행의 style 컬럼이 이 값으로 찍힌다.
-    if (intent?.action == ACTION_SET_STYLE) {
-      currentStyle = intent.getStringExtra(EXTRA_STYLE) ?: STYLE_UNSET
-      Log.i(tag, "스타일 변경: style=$currentStyle")
+    // 페르소나 변경 — 그 캘리브레이션으로 즉시 교체(패턴 파악 중이면 끝난 뒤 반영).
+    if (intent?.action == ACTION_SET_PERSONA) {
+      currentPersona = CalibrationPrefs.currentPersona(agPrefs())
+      if (!isCalibrating) applyCalibratedThresholds(readCalibratedThresholds())
+      Log.i(tag, "페르소나 변경: ${currentPersona?.id ?: Persona.NONE_ID}")
       return START_NOT_STICKY
     }
 
@@ -294,10 +292,8 @@ class BleService : Service() {
     // judgeWindow 가 판정을 건너뛰므로(calibratedThresholdsJson == null) 오조작 감지도 꺼진다.
     if (intent?.action == ACTION_CLEAR_CALIBRATION) {
       applyCalibratedThresholds(null)
-      getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
-        .remove(PREF_CALIBRATED_THRESHOLDS)
-        .apply()
-      Log.i(tag, "캘리브레이션 초기화 — 판정 중단 상태로 복귀")
+      CalibrationPrefs.clearCalibration(agPrefs(), currentPersona)
+      Log.i(tag, "캘리브레이션 초기화(${currentPersona?.id ?: Persona.NONE_ID}) — 판정 중단 상태로 복귀")
       return START_NOT_STICKY
     }
 
@@ -312,7 +308,8 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
-    // 이전에 캘리브레이션해 둔 임계값이 있으면 복원 — 매 주행마다 다시 캘리브레이션할 필요 없다.
+    // 캘리브레이션 임계값이 있으면 복원 — 매 주행마다 다시 캘리브레이션할 필요 없다.
+    currentPersona = CalibrationPrefs.currentPersona(agPrefs())
     applyCalibratedThresholds(readCalibratedThresholds())
     if (calibratedThresholdsJson != null) {
       Log.i(tag, "캘리브레이션된 임계값 복원: $calibratedThresholdsJson")
@@ -546,7 +543,7 @@ class BleService : Service() {
       val file = java.io.File(dir, "pedal_${ts}.csv")
       java.io.BufferedWriter(java.io.FileWriter(file, true)).also {
         it.write(
-          "date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,consecutive,label,style\n"
+          "date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,consecutive,label,persona\n"
         )
         csvWriter = it
         Log.i(tag, "RAW 로깅 시작: ${file.absolutePath}")
@@ -557,8 +554,9 @@ class BleService : Service() {
     }
   }
 
-  private fun readCalibratedThresholds(): String? =
-    getSharedPreferences("AgPrefs", MODE_PRIVATE).getString(PREF_CALIBRATED_THRESHOLDS, null)
+  private fun agPrefs() = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+
+  private fun readCalibratedThresholds(): String? = CalibrationPrefs.calibration(agPrefs(), currentPersona)
 
   // calibratedThresholdsJson, currentAccelHigh(캐시), detector 를 항상 같이 갱신 — 따로 손대면
   // CSV의 accel_high 나 판정 상태기계가 실제 임계값과 어긋난다.
@@ -584,6 +582,7 @@ class BleService : Service() {
   private fun startCalibration() {
     calibrationBuffer.clear()
     calibrationStartMs = System.currentTimeMillis()
+    calibrationPersona = currentPersona
     isCalibrating = true
     applyCalibratedThresholds(null)
     // DataCollectActivity가 다른 앱으로 전환됐다 돌아왔을 때 진행 상황을 되살릴 수 있게
@@ -618,12 +617,11 @@ class BleService : Service() {
         .callAttr("calibrate_thresholds_json", samplesJson.toString())
         .toString()
 
-      applyCalibratedThresholds(thresholdsJson)
-      getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
-        .putString(PREF_CALIBRATED_THRESHOLDS, thresholdsJson)
-        .apply()
+      CalibrationPrefs.saveCalibration(agPrefs(), calibrationPersona, thresholdsJson)
+      // 도중에 페르소나가 바뀌었으면 지금 페르소나의 값으로 판정을 이어간다
+      applyCalibratedThresholds(readCalibratedThresholds())
 
-      Log.i(tag, "캘리브레이션 완료 (${samples.size}샘플): $thresholdsJson")
+      Log.i(tag, "캘리브레이션 완료(${calibrationPersona?.id ?: Persona.NONE_ID}, ${samples.size}샘플): $thresholdsJson")
 
       // 다른 앱으로 전환된 상태라 ACTION_CALIBRATION_DONE 브로드캐스트를 놓쳐도(§DataCollectActivity
       // onResume 재동기화로 화면은 커버됨) 완료 사실 자체는 시스템 알림으로 바로 알려준다(2026-07-14).
@@ -659,7 +657,7 @@ class BleService : Service() {
           "${csvDateFormat.format(d)},${csvTimeFormat.format(d)}," +
             "${String.format(Locale.US, "%.4f", brake)},${String.format(Locale.US, "%.4f", accel)}," +
             "$moduleErr,$pedalErr,$accelHighStr,$accelRateStr,$accelScoreStr,$armedStr,$consecutiveStr," +
-            "$label,$currentStyle\n"
+            "$label,${currentPersona?.id ?: Persona.NONE_ID}\n"
         )
       } catch (e: Exception) {
         Log.e(tag, "CSV 쓰기 실패: ${e.message}")

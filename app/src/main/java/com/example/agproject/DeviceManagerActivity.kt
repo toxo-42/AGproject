@@ -113,8 +113,8 @@ class DeviceManagerActivity : AppCompatActivity() {
         .remove("TARGET_ADDRESS")
         .remove("TARGET_NAME")
         .remove("CONNECTION_STATUS")
-        .remove(BleService.PREF_CALIBRATED_THRESHOLDS)
         .remove(BleService.PREF_CALIBRATION_START_MS)
+        .let { CalibrationPrefs.clearAllCalibrations(it) }
         .apply()
       Toast.makeText(this, "기기 등록이 해제되었습니다.", Toast.LENGTH_SHORT).show()
       finish()

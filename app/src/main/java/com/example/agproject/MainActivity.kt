@@ -233,7 +233,7 @@ class MainActivity : AppCompatActivity() {
     val prefs: SharedPreferences = getSharedPreferences("AgPrefs", MODE_PRIVATE)
     targetAddress = prefs.getString("TARGET_ADDRESS", null)
     targetName = prefs.getString("TARGET_NAME", "AG_Test_Module")
-    isCalibrated = prefs.getString(BleService.PREF_CALIBRATED_THRESHOLDS, null) != null
+    isCalibrated = CalibrationPrefs.calibration(prefs) != null
   }
 
   private fun startSystem() {
@@ -304,8 +304,7 @@ class MainActivity : AppCompatActivity() {
   // 사용자가 이걸 모르고 지나치지 않게 강제로 안내한다.
   private fun maybeShowCalibrationOnboarding() {
     if (isCalibrationPopupShowing || isFinishing || isDestroyed) return
-    val calibrated = getSharedPreferences("AgPrefs", MODE_PRIVATE)
-      .getString(BleService.PREF_CALIBRATED_THRESHOLDS, null)
+    val calibrated = CalibrationPrefs.calibration(getSharedPreferences("AgPrefs", MODE_PRIVATE))
     if (calibrated != null) return
 
     isCalibrationPopupShowing = true

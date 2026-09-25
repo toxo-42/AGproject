@@ -21,6 +21,19 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
 
+    <!-- 개발자 전용 페르소나 선택(없음/초보/평범/난폭) — dev mode 에서만 보인다.
+         버튼은 DataCollectActivity 가 Persona 목록으로 채운다 -->
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/togglePersona"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_md"
+        android:visibility="gone"
+        app:singleSelection="true"
+        app:selectionRequired="true"
+        app:layout_constraintTop_toBottomOf="@id/tvCollectTitle"
+        app:layout_constraintStart_toStartOf="parent" />
+
     <!-- 현재 압력값 (숫자) -->
     <TextView
         android:id="@+id/tvLiveValues"
@@ -34,7 +47,7 @@
         android:textAppearance="?attr/textAppearanceTitleMedium"
         android:textColor="?attr/colorOnSurface"
         android:fontFamily="monospace"
-        app:layout_constraintTop_toBottomOf="@id/tvCollectTitle"
+        app:layout_constraintTop_toBottomOf="@id/togglePersona"
         app:layout_constraintStart_toStartOf="parent" />
 
     <!-- 실시간 그래프 (accel/brake + 임계선) — 카드 안에 넣어 화면 배경과 구분 -->
@@ -80,45 +93,6 @@
         android:textAppearance="?attr/textAppearanceBodyMedium"
         android:textColor="?attr/colorOnSurfaceVariant"
         app:layout_constraintBottom_toTopOf="@id/btnCalibrate" />
-
-    <!-- 개발자 전용 스타일 라벨링(강/보통/약) — 오조작 라벨과 별개로 CSV에 스타일 태그를 남긴다.
-         일반 진입 시 숨김, dev mode 에서만 표시(그 대신 "패턴 파악" 버튼은 dev mode 에서 숨김). -->
-    <RadioGroup
-        android:id="@+id/rgStyle"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:orientation="horizontal"
-        android:visibility="gone"
-        app:layout_constraintTop_toTopOf="@id/btnCalibrate"
-        app:layout_constraintBottom_toBottomOf="@id/btnCalibrate"
-        app:layout_constraintStart_toStartOf="@id/btnCalibrate"
-        app:layout_constraintEnd_toEndOf="@id/btnResetCalibration">
-
-        <RadioButton
-            android:id="@+id/rbStyleStrong"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:text="@string/style_strong"
-            android:textColor="?attr/colorOnSurface" />
-
-        <RadioButton
-            android:id="@+id/rbStyleNormal"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:text="@string/style_normal"
-            android:textColor="?attr/colorOnSurface" />
-
-        <RadioButton
-            android:id="@+id/rbStyleWeak"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:text="@string/style_weak"
-            android:textColor="?attr/colorOnSurface" />
-
-    </RadioGroup>
 
     <!-- 연속형 개인화 캘리브레이션("패턴 파악") — 캘리브레이션 시간 동안 실주행 패턴을 모아 accel_high를 개인화 -->
     <com.google.android.material.button.MaterialButton

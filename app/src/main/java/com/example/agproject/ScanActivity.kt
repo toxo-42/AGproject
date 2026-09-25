@@ -115,7 +115,7 @@ class ScanActivity : AppCompatActivity() {
     // 다른 모듈로 바꿔 등록하면 기존 캘리브레이션은 무효 — 센서 특성이 달라 무조건 다시 해야 한다
     // (2026-09-24 사용자 결정). 지우면 연결 시 MainActivity 온보딩 팝업이 재캘리브레이션을 유도한다.
     if (prefs.getString("TARGET_ADDRESS", null) != device.address) {
-      editor.remove(BleService.PREF_CALIBRATED_THRESHOLDS)
+      CalibrationPrefs.clearAllCalibrations(editor)
         .remove(BleService.PREF_CALIBRATION_START_MS)
     }
     editor.apply()

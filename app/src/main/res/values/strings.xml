@@ -9,6 +9,14 @@
   <string name="btn_scan">기기 검색 (Scan)</string>
   <string name="btn_manage">설정 (Manage)</string>
 
+  <!-- 개발자 데이터 수집 페르소나 (Persona) — 사용자 화면엔 안 보임 -->
+  <string name="persona_none">없음</string>
+  <string name="persona_beginner">초보</string>
+  <string name="persona_normal">평범</string>
+  <string name="persona_aggressive">난폭</string>
+  <string name="label_persona">페르소나 (개발자)</string>
+  <string name="title_data_collect_persona">%1$s · %2$s</string>
+
   <!-- 메인 화면 감시 상태 (MonitorState) -->
   <string name="monitor_no_device">기기 미등록</string>
   <string name="monitor_stopped">꺼짐</string>
@@ -70,9 +78,6 @@
   <string name="msg_dev_mode_entered">개발자 모드: 오조작 라벨링</string>
   <string name="btn_label_normal">○ 정상</string>
   <string name="btn_label_misop">● 오조작 기록 중</string>
-  <string name="style_strong">강함</string>
-  <string name="style_normal">보통</string>
-  <string name="style_weak">약함</string>
 
   <!-- 연속형 개인화 캘리브레이션(Phase B "패턴 파악") -->
   <string name="btn_calibrate">패턴 파악 시작 </string>

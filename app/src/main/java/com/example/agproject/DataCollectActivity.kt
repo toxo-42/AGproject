@@ -34,7 +34,7 @@ class DataCollectActivity : AppCompatActivity() {
   private lateinit var btnCalibrate: MaterialButton
   private lateinit var btnResetCalibration: ImageButton
   private lateinit var btnLabelMisop: MaterialButton
-  private lateinit var rgStyle: android.widget.RadioGroup
+  private lateinit var tvCollectTitle: TextView
 
   private var calibrationTimer: CountDownTimer? = null
   private var devMode = false
@@ -83,33 +83,18 @@ class DataCollectActivity : AppCompatActivity() {
     btnCalibrate = findViewById(R.id.btnCalibrate)
     btnResetCalibration = findViewById(R.id.btnResetCalibration)
     btnLabelMisop = findViewById(R.id.btnLabelMisop)
-    rgStyle = findViewById(R.id.rgStyle)
+    tvCollectTitle = findViewById(R.id.tvCollectTitle)
 
     btnCalibrate.setOnClickListener { startCalibrationFlow() }
     btnResetCalibration.setOnClickListener { confirmResetCalibration() }
 
     devMode = intent.getBooleanExtra(EXTRA_DEV_MODE, false)
     if (devMode) {
-      // dev mode 에서는 "패턴 파악"(연속형 캘리브레이션) 대신 강/보통/약 스타일 라벨링을 쓴다.
-      // INVISIBLE 로 숨겨 tvLegend 등 나머지 레이아웃 제약이 흔들리지 않게 한다(공간은 유지).
-      btnCalibrate.visibility = android.view.View.INVISIBLE
-      btnCalibrate.isEnabled = false
-      btnResetCalibration.visibility = android.view.View.INVISIBLE
-      btnResetCalibration.isEnabled = false
-
+      // dev mode: 페르소나 선택 + 오조작 라벨 토글을 보인다. 페르소나마다 캘리브레이션이 따로라
+      // 패턴 파악 버튼도 그대로 쓴다(페르소나를 고른 뒤 패턴 파악 → 그 페르소나 몫으로 저장).
+      setupPersonaToggle()
       btnLabelMisop.visibility = android.view.View.VISIBLE
       btnLabelMisop.setOnClickListener { toggleMisopLabel() }
-
-      rgStyle.visibility = android.view.View.VISIBLE
-      rgStyle.setOnCheckedChangeListener { _, checkedId ->
-        val style = when (checkedId) {
-          R.id.rbStyleStrong -> BleService.STYLE_STRONG
-          R.id.rbStyleNormal -> BleService.STYLE_NORMAL
-          R.id.rbStyleWeak -> BleService.STYLE_WEAK
-          else -> BleService.STYLE_UNSET
-        }
-        setStyleLabel(style)
-      }
     }
 
     // 그래프에 기존 캘리브레이션 값 반영은 onResume()에서 항상 수행한다(재진입 시 재동기화 포함).
@@ -135,6 +120,7 @@ class DataCollectActivity : AppCompatActivity() {
     // 남은 시간을 역산해 복구한다(2026-07-14, "cal 하다가 다른 앱 가면 멈춘 것처럼 보인다" 수정).
     showExistingCalibration()
     restoreCalibrationProgressIfRunning()
+    updateTitle()
   }
 
   override fun onPause() {
@@ -142,10 +128,7 @@ class DataCollectActivity : AppCompatActivity() {
     // 화면을 벗어나면 50Hz 브로드캐스트를 끈다.
     setLiveStream(false)
     // 라벨링 중이었다면 다음 세션에 새지 않도록 정상/미설정으로 되돌린다.
-    if (devMode) {
-      if (labelingMisop) setMisopLabel(false)
-      setStyleLabel(BleService.STYLE_UNSET)
-    }
+    if (devMode && labelingMisop) setMisopLabel(false)
     // 캘리브레이션 자체는 BleService 안에서 화면과 무관하게 계속 진행된다 —
     // 여기서 취소하는 건 화면에 남은 카운트다운 UI뿐.
     calibrationTimer?.cancel()
@@ -190,11 +173,49 @@ class DataCollectActivity : AppCompatActivity() {
     }
   }
 
-  private fun setStyleLabel(style: String) {
-    startService(Intent(this, BleService::class.java).apply {
-      action = BleService.ACTION_SET_STYLE
-      putExtra(BleService.EXTRA_STYLE, style)
-    })
+  // --- 개발자 페르소나 ---
+
+  // 페르소나 토글 — "없음" + Persona 목록으로 버튼을 만든다(페르소나 추가 시 여기 수정 불필요).
+  // 고른 값은 화면을 나가도 유지된다(그래야 수집 화면 없이 주행해도 그 페르소나로 기록됨).
+  // 감시 중이면 서비스가 그 페르소나의 캘리브레이션으로 즉시 바꾸게 알린다.
+  private fun setupPersonaToggle() {
+    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    val group = findViewById<com.google.android.material.button.MaterialButtonToggleGroup>(R.id.togglePersona)
+    group.visibility = android.view.View.VISIBLE
+    val current = CalibrationPrefs.currentPersona(prefs)
+    val options: List<Persona?> = listOf(null) + Persona.entries
+    options.forEach { persona ->
+      val button = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+        id = android.view.View.generateViewId()
+        tag = persona?.id ?: Persona.NONE_ID
+        setText(persona?.labelRes ?: R.string.persona_none)
+      }
+      group.addView(button, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+      if (persona == current) group.check(button.id)
+    }
+    group.addOnButtonCheckedListener { _, checkedId, isChecked ->
+      if (!isChecked) return@addOnButtonCheckedListener
+      val persona = Persona.fromId(group.findViewById<MaterialButton>(checkedId).tag as String)
+      if (persona == CalibrationPrefs.currentPersona(prefs)) return@addOnButtonCheckedListener
+      CalibrationPrefs.setCurrentPersona(prefs, persona)
+      if (BleService.monitorState.isActive) {
+        startService(Intent(this, BleService::class.java).apply { action = BleService.ACTION_SET_PERSONA })
+      }
+      // 페르소나마다 캘리브레이션이 다르므로 그래프 임계선·제목도 새로 반영
+      graph.setThresholds(PedalGraphView.DEFAULT_ACCEL_HIGH, PedalGraphView.DEFAULT_BRAKE_LOW)
+      showExistingCalibration()
+      updateTitle()
+    }
+  }
+
+  // dev mode 에서 페르소나를 골라 뒀으면 제목에 표시 — 지금 누구 몫으로 기록·캘리브레이션되는지
+  private fun updateTitle() {
+    val persona = if (devMode) CalibrationPrefs.currentPersona(getSharedPreferences("AgPrefs", MODE_PRIVATE)) else null
+    tvCollectTitle.text = if (persona == null) {
+      getString(R.string.title_data_collect)
+    } else {
+      getString(R.string.title_data_collect_persona, getString(R.string.title_data_collect), getString(persona.labelRes))
+    }
   }
 
   // --- 연속형 개인화 캘리브레이션("패턴 파악") ---
@@ -264,8 +285,7 @@ class DataCollectActivity : AppCompatActivity() {
   // 이미 캘리브레이션된 값이 있으면(다음 주행 재사용 케이스) 화면 진입 시 바로 그래프에 반영한다.
   // 없으면 PedalGraphView 기본값(0.85/0.10)이 임시 참고선으로 남는다.
   private fun showExistingCalibration() {
-    val json = getSharedPreferences("AgPrefs", MODE_PRIVATE)
-      .getString(BleService.PREF_CALIBRATED_THRESHOLDS, null) ?: return
+    val json = CalibrationPrefs.calibration(getSharedPreferences("AgPrefs", MODE_PRIVATE)) ?: return
     applyThresholdsToGraph(json)
   }
 
