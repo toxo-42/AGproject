@@ -394,6 +394,8 @@ class BleService : Service() {
     @SuppressLint("MissingPermission")
     override fun onScanResult(callbackType: Int, result: ScanResult?) {
       result?.let {
+        // stopScan 전에 결과가 여러 번 올 수 있다 — 두 번째부터는 무시해 GATT 가 중복 생성되지 않게
+        if (bluetoothGatt != null) return
         Log.i(tag, "기기 발견! 연결 시도 중...")
         bluetoothLeScanner?.stopScan(this)
         connectToDevice(it.device)
@@ -416,8 +418,14 @@ class BleService : Service() {
         updateNotification("기기 연결됨 - 오조작 감지 중...")
         gatt?.discoverServices()
       } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-        Log.w(tag, "연결 끊김. 재연결 시도...")
+        // 이미 정리한 GATT(서비스 종료 등)에서 뒤늦게 온 콜백이면 무시 — 종료된 서비스가 다시 스캔하지 않게
+        if (gatt == null || gatt != bluetoothGatt) return
+        Log.w(tag, "연결 끊김(status=$status). 재연결 시도...")
         setMonitorState(MonitorState.RECONNECTING)
+        // 끊긴 GATT 를 닫고 비워야 startTargetScan() 의 "이미 연결 중" 가드를 통과한다.
+        // (이전엔 안 비워서 한 번 끊기면 재연결이 영영 시작되지 않았음)
+        gatt.close()
+        bluetoothGatt = null
         startTargetScan()
       }
     }
