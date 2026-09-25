@@ -6,24 +6,6 @@
     android:layout_height="match_parent"
     android:background="?attr/colorSurface">
 
-    <!-- 블러 배경 이미지 (MainActivity에서 Glide로 로드) -->
-    <ImageView
-        android:id="@+id/ivBackground"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:scaleType="centerCrop"
-        android:contentDescription="Background Image"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <!-- 반투명 막: 배경 이미지를 은은하게만 비치게 해서 글자 가독성 확보 (투명도는 scrim_main에서 조절) -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="@color/scrim_main" />
-
     <TextView
         android:id="@+id/tvAppTitle"
         android:layout_width="wrap_content"

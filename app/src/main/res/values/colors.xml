@@ -13,8 +13,6 @@
     <color name="warning_red">@color/md_theme_errorContainer</color>
     <color name="warning_button">@color/md_theme_tertiary</color>
 
-    <!-- 메인 화면: 블러 배경 이미지 위에 까는 반투명 막 -->
-    <color name="scrim_main">#D9101820</color>
     <!-- 오조작 경고(CriticalActivity) 전용 — 이 화면은 구버전 MaterialComponents 테마라 ?attr 대신 직접 참조 -->
     <color name="critical_bg">@color/md_theme_errorContainer</color>
     <color name="critical_on_bg">#FFFFFF</color>

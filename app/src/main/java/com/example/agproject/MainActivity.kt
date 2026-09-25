@@ -21,9 +21,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.R as MaterialR
-import com.bumptech.glide.Glide
-import com.bumptech.glide.request.RequestOptions
-import jp.wasabeef.glide.transformations.BlurTransformation
 
 
 class MainActivity : AppCompatActivity() {
@@ -71,14 +68,6 @@ class MainActivity : AppCompatActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
-
-    // 배경 블러처리
-    val ivBackground = findViewById<ImageView>(R.id.ivBackground)
-
-    Glide.with(this)
-      .load(R.drawable.bg_main_capture)// 캡처해서 넣은 이미지 파일명
-      .apply(RequestOptions.bitmapTransform(BlurTransformation(25, 3)))
-      .into(ivBackground)
 
     // UI 연결 (activity_main.xml의 ID와 연결)
     cardCurrentTarget = findViewById(R.id.cardCurrentTarget)
