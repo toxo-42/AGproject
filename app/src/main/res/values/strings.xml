@@ -9,6 +9,19 @@
   <string name="btn_scan">기기 검색 (Scan)</string>
   <string name="btn_manage">설정 (Manage)</string>
 
+  <!-- 메인 화면 감시 상태 (MonitorState) -->
+  <string name="monitor_no_device">기기 미등록</string>
+  <string name="monitor_stopped">꺼짐</string>
+  <string name="monitor_connecting">연결 중…</string>
+  <string name="monitor_monitoring">감시 중</string>
+  <string name="monitor_reconnecting">재연결 중…</string>
+  <string name="monitor_wrong_device">잘못된 기기</string>
+  <string name="msg_wrong_device">UUID 불일치 — 기기를 다시 검색하세요</string>
+  <string name="calibration_done">패턴 파악 완료</string>
+  <string name="calibration_needed">패턴 파악 필요 · 오조작 감지 꺼짐  ›</string>
+  <string name="btn_start_monitor">감시 시작</string>
+  <string name="btn_stop_monitor">감시 중지</string>
+
   <string name="title_scan">Device Scan</string>
   <string name="unknown_device">Unknown Device</string>
   <string name="default_mac">00:00:00:00:00:00</string>

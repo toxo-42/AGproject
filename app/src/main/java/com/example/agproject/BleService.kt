@@ -151,6 +151,16 @@ class BleService : Service() {
   private var calibrationStartMs = 0L
 
   companion object {
+    /**
+     * 감시 상태 — 화면이 "지금 보호받고 있나"를 표시하는 단일 출처(MonitorState 참고).
+     * 전역 상태지만 쓰기는 이 서비스(setMonitorState)만 하고 밖에서는 읽기만 한다.
+     * prefs 가 아니라 메모리에 두는 이유: 프로세스가 죽으면 STOPPED 로 자동 초기화돼
+     * "꺼졌는데 감시 중으로 보이는" 낡은 값이 남지 않는다.
+     */
+    @Volatile var monitorState: MonitorState = MonitorState.STOPPED
+      private set
+    const val ACTION_MONITOR_STATE = "ACTION_MONITOR_STATE"
+
     // Nordic UART Service (NUS) 표준 UUID
     private val NUS_SERVICE = UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
     private val NUS_RX = UUID.fromString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E") // 폰 -> 기기 (Write)
@@ -309,6 +319,7 @@ class BleService : Service() {
     }
 
     startForegroundServiceNotification("타겟 감시 중: $targetAddress")
+    setMonitorState(MonitorState.CONNECTING)
     startTargetScan()
 
     return START_NOT_STICKY
@@ -348,6 +359,8 @@ class BleService : Service() {
     // 순서 중요: GATT 를 먼저 끊어야 뒤늦은 notify 콜백이 세션 파일을 되살리지 않는다.
     disconnectGatt()
     closeCsvWriter()   // 세션 로그 파일 flush + close
+    // UUID 불일치로 스스로 종료한 경우엔 그 사실을 화면에 남겨 두려고 WRONG_DEVICE 유지
+    if (monitorState != MonitorState.WRONG_DEVICE) setMonitorState(MonitorState.STOPPED)
     super.onDestroy()
   }
 
@@ -404,6 +417,7 @@ class BleService : Service() {
         gatt?.discoverServices()
       } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
         Log.w(tag, "연결 끊김. 재연결 시도...")
+        setMonitorState(MonitorState.RECONNECTING)
         startTargetScan()
       }
     }
@@ -436,6 +450,7 @@ class BleService : Service() {
       }
 
       saveStatus("정상 연결")
+      setMonitorState(MonitorState.MONITORING)
       sendBroadcastToActivity("ACTION_UUID_MATCHED")
 
       // 규격 §6: notify 구독 '전에' MTU를 키워야 한다.
@@ -907,6 +922,14 @@ class BleService : Service() {
     prefs.edit().putString("CONNECTION_STATUS", statusMsg).apply()
   }
 
+  // 상태가 실제로 바뀔 때만 방송한다. BLE 콜백 스레드에서도 불린다(@Volatile).
+  private fun setMonitorState(state: MonitorState) {
+    if (monitorState == state) return
+    monitorState = state
+    Log.i(tag, "감시 상태: $state")
+    sendBroadcastToActivity(ACTION_MONITOR_STATE)
+  }
+
   private fun sendBroadcastToActivity(action: String) {
     val intent = Intent(action)
     intent.setPackage(packageName)
@@ -961,6 +984,7 @@ class BleService : Service() {
   private fun handleUuidMismatch() {
     Log.e(tag, "목표 서비스/특성을 찾을 수 없음 (UUID 확인 필요)")
     saveStatus("경고: 인증 코드가 다릅니다. (UUID 불일치)")
+    setMonitorState(MonitorState.WRONG_DEVICE)
     val intent = Intent("ACTION_UUID_MISMATCH")
     intent.setPackage(packageName)
     applicationContext.sendBroadcast(intent)

@@ -49,7 +49,8 @@
         app:layout_constraintTop_toBottomOf="@id/tvAppTitle"
         app:layout_constraintStart_toStartOf="parent" />
 
-    <!-- 현재 대상 기기 카드. 테두리 색/굵기는 MainActivity가 연결 상태에 따라 바꾼다 -->
+    <!-- 현재 대상 기기 카드. 상태 칩·테두리·보조 문구는 MainActivity.updateUI()가
+         BleService.monitorState 와 캘리브레이션 여부에 따라 바꾼다 -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/cardCurrentTarget"
         android:layout_width="0dp"
@@ -67,23 +68,44 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:paddingHorizontal="@dimen/space_lg"
-            android:paddingVertical="@dimen/space_xl"
+            android:paddingTop="@dimen/space_lg"
+            android:paddingBottom="@dimen/space_md"
             android:gravity="center_horizontal">
 
-            <ImageView
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:padding="14dp"
-                android:src="@drawable/ic_bluetooth"
-                android:background="@drawable/bg_icon_circle"
-                android:backgroundTint="?attr/colorPrimaryContainer"
-                app:tint="?attr/colorOnPrimaryContainer"
-                android:importantForAccessibility="no" />
+            <!-- 상태 칩: ● + 상태 글자. 배경/점 색은 코드에서 지정 -->
+            <LinearLayout
+                android:id="@+id/layoutStatusChip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_pill"
+                android:backgroundTint="?attr/colorSurfaceContainerHighest"
+                android:paddingHorizontal="14dp"
+                android:paddingVertical="6dp">
+
+                <View
+                    android:id="@+id/viewStatusDot"
+                    android:layout_width="10dp"
+                    android:layout_height="10dp"
+                    android:background="@drawable/bg_icon_circle"
+                    android:backgroundTint="?attr/colorOutline" />
+
+                <TextView
+                    android:id="@+id/tvStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:text="@string/monitor_stopped"
+                    android:textAppearance="?attr/textAppearanceLabelLarge"
+                    android:textColor="?attr/colorOnSurface"
+                    android:textStyle="bold" />
+            </LinearLayout>
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_md"
+                android:layout_marginTop="@dimen/space_lg"
                 android:text="@string/label_current_target"
                 android:textAppearance="?attr/textAppearanceLabelMedium"
                 android:textColor="?attr/colorOnSurfaceVariant"
@@ -104,14 +126,50 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/space_xs"
+                android:gravity="center"
                 android:text="@string/register_prompt"
                 android:textAppearance="?attr/textAppearanceBodyMedium"
                 android:textColor="?attr/colorOutline" />
+
+            <!-- 캘리브레이션(패턴 파악) 상태 줄. 미완료면 눌러서 데이터 수집 화면으로 이동 -->
+            <View
+                android:id="@+id/dividerCalibration"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="@dimen/space_lg"
+                android:background="?attr/colorOutlineVariant" />
+
+            <LinearLayout
+                android:id="@+id/layoutCalibration"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/icon_button"
+                android:layout_marginTop="@dimen/space_sm"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:background="?attr/selectableItemBackground">
+
+                <ImageView
+                    android:id="@+id/ivCalibration"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_check_circle"
+                    app:tint="?attr/colorPrimary"
+                    android:importantForAccessibility="no" />
+
+                <TextView
+                    android:id="@+id/tvCalibration"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:text="@string/calibration_done"
+                    android:textAppearance="?attr/textAppearanceLabelLarge"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+            </LinearLayout>
         </LinearLayout>
 
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- 하단 동작 버튼: 주 동작(검색)은 채움, 보조 동작(관리)은 톤 버튼 -->
+    <!-- 하단 동작: 주 동작(감시 시작/중지)은 크게, 보조 동작(검색·설정)은 한 줄에 톤 버튼 -->
     <LinearLayout
         android:id="@+id/layoutActions"
         android:layout_width="0dp"
@@ -123,23 +181,53 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
+        <!-- 시작/중지는 두 버튼을 번갈아 보이게 한다(런타임에 스타일을 바꾸는 것보다 단순) -->
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnGoScan"
+            android:id="@+id/btnStartMonitor"
             android:layout_width="match_parent"
             android:layout_height="@dimen/button_height_large"
-            android:text="@string/btn_scan"
-            app:icon="@drawable/ic_search"
+            android:text="@string/btn_start_monitor"
+            app:icon="@drawable/ic_play"
             app:iconGravity="textStart" />
 
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnGoManager"
-            style="@style/Widget.PeOb.Button.Tonal"
+            android:id="@+id/btnStopMonitor"
+            style="@style/Widget.PeOb.Button.Outlined.Danger"
             android:layout_width="match_parent"
             android:layout_height="@dimen/button_height_large"
-            android:layout_marginTop="@dimen/space_sm"
-            android:text="@string/btn_manage"
-            app:icon="@drawable/ic_tune"
+            android:text="@string/btn_stop_monitor"
+            android:visibility="gone"
+            app:icon="@drawable/ic_stop"
             app:iconGravity="textStart" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnGoScan"
+                style="@style/Widget.PeOb.Button.Tonal"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/button_height"
+                android:layout_weight="1"
+                android:layout_marginEnd="@dimen/space_xs"
+                android:text="@string/btn_scan"
+                app:icon="@drawable/ic_search"
+                app:iconGravity="textStart" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnGoManager"
+                style="@style/Widget.PeOb.Button.Tonal"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/button_height"
+                android:layout_weight="1"
+                android:layout_marginStart="@dimen/space_xs"
+                android:text="@string/btn_manage"
+                app:icon="@drawable/ic_tune"
+                app:iconGravity="textStart" />
+        </LinearLayout>
 
     </LinearLayout>
 
