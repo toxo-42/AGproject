@@ -38,6 +38,7 @@ class TrialActivity : AppCompatActivity() {
   private lateinit var tvTypeLabel: TextView
   private lateinit var tvTypeDesc: TextView
   private lateinit var tvReps: TextView
+  private lateinit var tvTotalTime: TextView
   private lateinit var tvProgress: TextView
   private lateinit var tvPhase: TextView
   private lateinit var tvCountdown: TextView
@@ -78,6 +79,7 @@ class TrialActivity : AppCompatActivity() {
     tvTypeLabel = findViewById(R.id.tvTypeLabel)
     tvTypeDesc = findViewById(R.id.tvTypeDesc)
     tvReps = findViewById(R.id.tvReps)
+    tvTotalTime = findViewById(R.id.tvTotalTime)
     tvProgress = findViewById(R.id.tvProgress)
     tvPhase = findViewById(R.id.tvPhase)
     tvCountdown = findViewById(R.id.tvCountdown)
@@ -152,6 +154,13 @@ class TrialActivity : AppCompatActivity() {
     tvTypeLabel.setText(if (selectedType.isMisop) R.string.trial_label_misop else R.string.trial_label_normal)
     tvTypeDesc.setText(selectedType.instructionRes)
     tvReps.text = getString(R.string.trial_reps, reps)
+    tvTotalTime.text = getString(R.string.trial_total_time, formatDuration(trialTotalDurationMs(selectedType, reps)))
+  }
+
+  private fun formatDuration(ms: Long): String {
+    val totalSec = (ms / 1000).toInt()
+    return if (totalSec >= 60) getString(R.string.duration_min_sec, totalSec / 60, totalSec % 60)
+    else getString(R.string.duration_sec, totalSec)
   }
 
   // --- ② 진행 ---

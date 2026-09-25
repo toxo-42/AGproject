@@ -55,6 +55,12 @@ class TrialScheduleTest {
   }
 
   @Test
+  fun 총_시간은_준비_조작_휴식을_모두_더한_값이다() {
+    // 자유 조작 3회: (준비 3초 + 조작 120초) × 3 + 휴식 3초 × 2 = 375초
+    assertEquals(375_000L, trialTotalDurationMs(TrialType.FREE_ACT, reps = 3))
+  }
+
+  @Test
   fun 실험_종류_id는_중복되지_않는다() {
     val ids = TrialType.entries.map { it.id }
     assertEquals(ids.size, ids.toSet().size)

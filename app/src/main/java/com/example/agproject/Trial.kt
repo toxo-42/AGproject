@@ -69,6 +69,9 @@ fun buildTrialSchedule(
   }
 }
 
+/** 실험 한 번에 걸리는 총 시간(준비·휴식 포함) — 설정 화면에 미리 보여주는 값 */
+fun trialTotalDurationMs(type: TrialType, reps: Int): Long = buildTrialSchedule(type, reps).sumOf { it.durationMs }
+
 /** 실험 결과 요약 — 감지된 회차 번호로 "N회 중 M회 감지/오탐"을 계산한다. */
 data class TrialSummary(val type: TrialType, val reps: Int, val detectedReps: Set<Int>) {
   val detectedCount: Int get() = detectedReps.size

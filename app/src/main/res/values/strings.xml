@@ -29,6 +29,9 @@
   <string name="trial_free_act">자유 조작</string>
   <string name="trial_free_act_desc">선택한 페르소나답게 평소 운전하듯 자유롭게 조작하세요</string>
   <string name="trial_reps">%1$d회</string>
+  <string name="trial_total_time">총 약 %1$s</string>
+  <string name="duration_min_sec">%1$d분 %2$d초</string>
+  <string name="duration_sec">%1$d초</string>
   <string name="trial_label_misop">오조작(label=1)</string>
   <string name="trial_label_normal">정상(label=0)</string>
   <string name="btn_trial_start">실험 시작</string>

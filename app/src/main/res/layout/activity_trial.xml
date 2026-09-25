@@ -106,6 +106,16 @@
           android:text="+" />
     </LinearLayout>
 
+    <!-- 준비·휴식까지 포함한 총 소요 시간 -->
+    <TextView
+        android:id="@+id/tvTotalTime"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_sm"
+        android:gravity="center"
+        android:textAppearance="?attr/textAppearanceBodyLarge"
+        android:textColor="?attr/colorOnSurfaceVariant" />
+
     <View
         android:layout_width="match_parent"
         android:layout_height="0dp"
