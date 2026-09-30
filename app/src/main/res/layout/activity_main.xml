@@ -113,7 +113,7 @@
                 android:textAppearance="?attr/textAppearanceBodyMedium"
                 android:textColor="?attr/colorOutline" />
 
-            <!-- 캘리브레이션(패턴 파악) 상태 줄. 미완료면 눌러서 데이터 수집 화면으로 이동 -->
+            <!-- 개인화(습관 학습) 상태 줄. 미완료면 눌러서 페달 입력 그래프 화면(브레이크 영점 조절)으로 이동 -->
             <View
                 android:id="@+id/dividerCalibration"
                 android:layout_width="match_parent"

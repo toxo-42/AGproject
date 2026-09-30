@@ -44,6 +44,7 @@ class MainActivity : AppCompatActivity() {
   private var targetAddress: String? = null
   private var targetName: String? = null
   private var isCalibrated = false
+  private var habitProgress: HabitProgress? = null
 
   // 캘리브레이션 온보딩 팝업이 이미 떠 있는 동안 중복으로 안 뜨게 막는 플래그.
   private var isCalibrationPopupShowing = false
@@ -193,20 +194,22 @@ class MainActivity : AppCompatActivity() {
     cardCurrentTarget.strokeColor = dotColor
     cardCurrentTarget.strokeWidth = if (showStroke) (2 * resources.displayMetrics.density).toInt() else 0
 
-    // 3. 캘리브레이션 줄 — 패턴 파악 전엔 오조작 감지가 꺼져 있다는 걸 항상 보이게
+    // 3. 캘리브레이션 줄 — 개인화 전엔 기본값으로 감지 중이라는 것과 습관 학습 진행도를 보인다
     dividerCalibration.isVisible = hasDevice
     layoutCalibration.isVisible = hasDevice
     layoutCalibration.isClickable = !isCalibrated
     if (isCalibrated) {
       ivCalibration.setImageResource(R.drawable.ic_check_circle)
       ivCalibration.imageTintList = ColorStateList.valueOf(MaterialColors.getColor(ivCalibration, MaterialR.attr.colorPrimary))
-      tvCalibration.setText(R.string.calibration_done)
+      tvCalibration.setText(if (habitProgress?.ready == true) R.string.calibration_habit_ready else R.string.calibration_done)
       tvCalibration.setTextColor(onSurfaceVariant)
     } else {
       val tertiary = MaterialColors.getColor(ivCalibration, MaterialR.attr.colorTertiary)
       ivCalibration.setImageResource(R.drawable.ic_warning)
       ivCalibration.imageTintList = ColorStateList.valueOf(tertiary)
-      tvCalibration.setText(R.string.calibration_needed)
+      val progress = habitProgress
+      tvCalibration.text = if (progress != null) getString(R.string.calibration_needed_learning, progress.events, progress.gate)
+        else getString(R.string.calibration_needed)
       tvCalibration.setTextColor(tertiary)
     }
 
@@ -222,7 +225,8 @@ class MainActivity : AppCompatActivity() {
     val prefs: SharedPreferences = getSharedPreferences("AgPrefs", MODE_PRIVATE)
     targetAddress = prefs.getString("TARGET_ADDRESS", null)
     targetName = prefs.getString("TARGET_NAME", "AG_Test_Module")
-    isCalibrated = CalibrationPrefs.isDetectionReady(prefs)
+    isCalibrated = CalibrationPrefs.isPersonalized(prefs)
+    habitProgress = CalibrationPrefs.habitProgress(prefs)
   }
 
   private fun startSystem() {
@@ -288,12 +292,13 @@ class MainActivity : AppCompatActivity() {
     dialog.show()
   }
 
-  // 연결 성공 시, 아직 캘리브레이션한 적이 없으면 "패턴 파악" 화면으로 유도하는 팝업.
-  // 캘리브레이션 전엔 오조작 감지가 아예 동작하지 않으므로(BleService.judgeWindow 참고)
-  // 사용자가 이걸 모르고 지나치지 않게 강제로 안내한다.
+  // 연결 성공 시, 브레이크 영점 조절을 한 적이 없고 아직 개인화 전이면 영점 조절(그래프 화면)로 안내하는 팝업.
+  // 실차 부착 시 예압이 있으면 영점 조절 없인 brake_low 가 0.10 에 머물러 오조작 경고가 뜰 수 없다(§진행상황 §6).
+  // 엑셀 습관은 주행 중 자동 학습되므로 여기선 권하지 않는다.
   private fun maybeShowCalibrationOnboarding() {
     if (isCalibrationPopupShowing || isFinishing || isDestroyed) return
-    if (CalibrationPrefs.isDetectionReady(getSharedPreferences("AgPrefs", MODE_PRIVATE))) return
+    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    if (CalibrationPrefs.userCalibration(prefs) != null || CalibrationPrefs.isPersonalized(prefs)) return
 
     isCalibrationPopupShowing = true
     val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
@@ -302,6 +307,7 @@ class MainActivity : AppCompatActivity() {
       .setPositiveButton(R.string.btn_calibration_onboarding_start) { _, _ ->
         startActivity(Intent(this, DataCollectActivity::class.java))
       }
+      .setNegativeButton(R.string.btn_calibration_onboarding_later, null)
       .setOnDismissListener { isCalibrationPopupShowing = false }
       .create()
     dialog.show()

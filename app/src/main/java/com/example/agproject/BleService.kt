@@ -48,7 +48,7 @@ class BleService : Service() {
   // 오조작 경고 상태기계(trigger→무장→지속시간→여유) — Python judge.MisopDetector 인스턴스.
   // 2026-09-24 Kotlin 필드(armed/consecutive/gap/shown)에서 Python 으로 이관(Kotlin=UI,
   // Python=판정 backend 방향). 임계값이 바뀔 때마다 applyCalibratedThresholds() 가 새로 만든다.
-  // null = 캘리브레이션 전 → 판정 안 함.
+  // null = 패턴 파악(캘리브레이션) 진행 중 → 판정 안 함. 캘리브레이션 전에는 기본 임계값으로 만든다.
   @Volatile private var detector: PyObject? = null
 
   // judgeWindow() 한 번의 결과. writeRawCsv() 가 같은 윈도우 행을 쓸 때 인자로 받는다.
@@ -87,17 +87,18 @@ class BleService : Service() {
   //     찍었는데, judge.py 에 변화율(미분) 트리거가 추가되면서 "완만하게 계속 깊게 밟는 상태"와
   //     "실제로 경고가 뜬 사건"이 달라졌다 — 후자만 남겨야 증거자료로서 의미가 있다.
   //     JudgeResult.fired 로 판정한다. ⚠️ 알고리즘이 자동으로 트리거한 것이라
-  //     캘리브레이션 전(accel_high 미설정)이면 judgeWindow 가 판정 자체를 건너뛰어 항상 "none"이다
+  //     패턴 파악 진행 중이면 judgeWindow 가 판정 자체를 건너뛰어 항상 "none"이다
   //     — 아래 label(수동)과는 독립적인, 실시간 감지 결과일 뿐이라는 점에 주의.
-  //   - accel_high: 그 순간 적용 중인 개인화 임계값(캘리브레이션 전이면 "none").
+  //   - accel_high: 그 순간 적용 중인 임계값(캘리브레이션 전이면 기본값 calibration.DEFAULT_ACCEL_HIGH,
+  //     2026-10-01 전 파일은 "none"). 패턴 파악 진행 중이면 "none".
   //   - accel_rate: judge_calibrated_json 이 계산한 그 윈도우의 "rate"(RATE_LAG_SAMPLES=50ms
   //     떨어진 두 샘플 간 엑셀 델타의 최댓값) — accel_rate_high(급조작 트리거 임계값)와 직접
-  //     비교되는 값 그 자체. 판정 자체가 스킵된 윈도우(캘리브레이션 중/전)는 "none"
+  //     비교되는 값 그 자체. 판정 자체가 스킵된 윈도우(패턴 파악 중, 2026-10-01 전 파일은 캘리브레이션 전도)는 "none"
   //     (2026-07-18 사용자 요청 — accel_rate_high 실측 튜닝에 쓸 실제 값 분포를 보기 위함).
   //   - accel_score: 그 윈도우의 "score"(레벨 조건 hits 비율) — high_ratio와 직접 비교되는
   //     값. 스킵된 윈도우는 "none".
   //   - armed: judgeWindow() 처리 후 그 시점의 무장 상태(judge.MisopDetector). 스킵된 윈도우는
-  //     "none"(2026-09-24 상태기계 Python 이관 후 — 캘리브레이션 전/중엔 detector 자체가 없다).
+  //     "none"(2026-09-24 상태기계 Python 이관 후 — 패턴 파악 중엔 detector 자체가 없다).
   //   - consecutive: 그 시점의 연속 misop 윈도우 카운트. 스킵된 윈도우는 "none".
   //     accel_score/armed/consecutive 셋 다 "긴 홀드형 오조작 재현이 왜 반복적으로 안 잡히는지"
   //     진단용으로 추가(2026-07-18) — 로그캣 없이 CSV만으로 무장이 언제 풀렸는지 재구성 가능.
@@ -134,6 +135,15 @@ class BleService : Service() {
   // 수집 화면이 떠 있는 동안만 true. BLE 콜백 스레드가 읽고 메인 스레드가 쓴다.
   @Volatile private var liveStreamEnabled = false
 
+  // ── 페달 테두리 표시 (사용자 설정, 기본 on) ─────────────────────────
+  // 페달이 바뀌는 순간 다른 앱 위에 은은한 테두리를 띄운다(PedalEdgeOverlay).
+  // 창은 MONITORING 동안만 붙어 있다(setMonitorState 참고). 설정은 BLE 콜백 스레드가 읽고 메인 스레드가 쓴다.
+  @Volatile private var pedalEdgeEnabled = true
+  // 오조작 경고 화면(CriticalActivity)이 보이는 동안 true — 경고 위에 초록/파랑이 겹치지 않게 테두리를 뗀다.
+  @Volatile private var criticalShowing = false
+  private lateinit var pedalEdgeOverlay: PedalEdgeOverlay
+  private val pedalStateTracker = PedalStateTracker()
+
   // ── 로그 스로틀링 ────────────────────────────────────────────────
   // 배치 50Hz / 판정 4Hz 로 로그를 찍으면 logcat 링버퍼가 몇 분 만에 밀려 나가
   // 정작 필요한 연결·오류 로그가 사라진다. 요약과 상태 변화만 남긴다.
@@ -143,6 +153,12 @@ class BleService : Service() {
   private var lastJudgeLogMs = 0L
   private var lastLoggedMisop: Boolean? = null
   private var lastTextMessage: String? = null
+
+  // ── 습관 학습 (peob.habit.HabitLearner) ──────────────────────────
+  // 주행하면서 평소 엑셀 깊이를 누적해 accel_high 를 개인화한다. 상태는 prefs 에 JSON 으로 저장돼 주행을 넘어 이어진다.
+  // 적용 시점은 주행 시작(readCalibratedThresholds) + 주행 중 게이트를 처음 넘는 순간뿐 — 그 뒤 갱신은 다음 주행부터.
+  @Volatile private var habitLearner: PyObject? = null
+  private var lastHabitSaveMs = 0L
 
   // ── 연속형 개인화 캘리브레이션 상태 ──────────────────────────────
   // 계산된 임계값이 있으면(null 이 아니면) judgeWindow 가 profile 대신 이걸 쓴다.
@@ -170,6 +186,16 @@ class BleService : Service() {
     @Volatile var monitorState: MonitorState = MonitorState.STOPPED
       private set
     const val ACTION_MONITOR_STATE = "ACTION_MONITOR_STATE"
+
+    /**
+     * 지금 판정에 실제로 적용 중인 임계값 JSON — 화면(수집 그래프 임계선)이 그릴 단일 출처.
+     * 습관 학습·페르소나·캘리브레이션이 섞여 결정되므로 화면이 prefs 를 따로 읽어 재구성하면 어긋난다.
+     * monitorState 와 같은 규칙: 쓰기는 applyCalibratedThresholds 만, 바뀌면 ACTION_THRESHOLDS_CHANGED 방송.
+     * null = 서비스 꺼짐 또는 패턴 파악 중(판정 안 함).
+     */
+    @Volatile var appliedThresholdsJson: String? = null
+      private set
+    const val ACTION_THRESHOLDS_CHANGED = "ACTION_THRESHOLDS_CHANGED"
 
     // Nordic UART Service (NUS) 표준 UUID
     private val NUS_SERVICE = UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
@@ -213,13 +239,16 @@ class BleService : Service() {
     // ── 연속형 개인화 캘리브레이션 (Phase B, calibration.py 대응) ──────────
     // 3단계 프로필(discrete) 방식은 실측에서 경계가 불안정해 폐기했다(§진행상황_및_로드맵.md
     // Phase B). 캘리브레이션 세션에서 뽑은 accel_active_p90 + 오프셋으로 개인별 accel_high 를
-    // 직접 계산하는 이 방식만 쓴다. 캘리브레이션 전에는 판정 자체를 하지 않는다(judgeWindow 참고).
+    // 직접 계산하는 이 방식만 쓴다. 캘리브레이션 전에는 기본 임계값으로 판정한다(readCalibratedThresholds 참고).
     const val ACTION_START_CALIBRATION = "ACTION_START_CALIBRATION"
     const val ACTION_CALIBRATION_DONE = "ACTION_CALIBRATION_DONE"
     const val ACTION_CLEAR_CALIBRATION = "ACTION_CLEAR_CALIBRATION"
     const val EXTRA_THRESHOLDS_JSON = "THRESHOLDS_JSON"
     // 캘리브레이션 값 자체는 사용자/페르소나별로 CalibrationPrefs 가 저장한다.
     const val CALIBRATION_DURATION_MS = 15_000L
+
+    // 습관 학습 상태 저장 주기 — 주행이 끝나면 onDestroy 에서도 저장한다.
+    private const val HABIT_SAVE_INTERVAL_MS = 60_000L
 
     // 캘리브레이션 시작 시각(epoch ms) — 화면(DataCollectActivity)이 다른 앱으로 전환됐다가
     // 돌아왔을 때 "지금 캘리브레이션이 진행 중인지, 얼마나 남았는지"를 되살리는 용도(2026-07-14).
@@ -236,11 +265,21 @@ class BleService : Service() {
     const val ACTION_LIVE_SAMPLES = "ACTION_LIVE_SAMPLES"
     const val EXTRA_ACCELS = "ACCELS"   // FloatArray, 배치 내 샘플 순서
     const val EXTRA_BRAKES = "BRAKES"   // FloatArray, 같은 길이
+
+    // 페달 테두리 표시 on/off — 설정 화면이 prefs 에 저장한 뒤 이 action 으로 알린다(서비스는 다시 읽기만).
+    const val ACTION_SET_PEDAL_EDGE = "ACTION_SET_PEDAL_EDGE"
+    const val PREF_PEDAL_EDGE_ENABLED = "PEDAL_EDGE_ENABLED"
+
+    // 경고 화면 표시/닫힘 알림 (CriticalActivity onStart/onStop)
+    const val ACTION_SET_CRITICAL_SHOWING = "ACTION_SET_CRITICAL_SHOWING"
+    const val EXTRA_CRITICAL_SHOWING = "CRITICAL_SHOWING"
   }
 
   override fun onCreate() {
     super.onCreate()
     createNotificationChannel()
+    pedalEdgeOverlay = PedalEdgeOverlay(this)
+    pedalEdgeEnabled = agPrefs().getBoolean(PREF_PEDAL_EDGE_ENABLED, true)
     val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
     bluetoothAdapter = bluetoothManager.adapter
     bluetoothLeScanner = bluetoothAdapter?.bluetoothLeScanner
@@ -293,18 +332,36 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
+    // 페달 테두리 표시 on/off — 감시 중이면 바로 붙이거나 뗀다.
+    if (intent?.action == ACTION_SET_PEDAL_EDGE) {
+      pedalEdgeEnabled = agPrefs().getBoolean(PREF_PEDAL_EDGE_ENABLED, true)
+      updatePedalEdgeOverlay()
+      Log.i(tag, "페달 테두리 표시: $pedalEdgeEnabled")
+      return START_NOT_STICKY
+    }
+
+    // 경고 화면이 떠 있는 동안엔 테두리를 끈다.
+    if (intent?.action == ACTION_SET_CRITICAL_SHOWING) {
+      criticalShowing = intent.getBooleanExtra(EXTRA_CRITICAL_SHOWING, false)
+      updatePedalEdgeOverlay()
+      return START_NOT_STICKY
+    }
+
     // 패턴 파악(연속형 캘리브레이션) 시작. 이미 감시 중인 세션에 바로 적용되며 재연결이 필요 없다.
     if (intent?.action == ACTION_START_CALIBRATION) {
       startCalibration()
       return START_NOT_STICKY
     }
 
-    // 캘리브레이션 초기화 — 삭제 후 재설치한 것처럼 되돌린다. 다시 패턴 파악하기 전까지
-    // judgeWindow 가 판정을 건너뛰므로(calibratedThresholdsJson == null) 오조작 감지도 꺼진다.
+    // 캘리브레이션 초기화 — 삭제 후 재설치한 것처럼 되돌린다. 판정은 끄지 않고 기본 임계값으로 돌아간다
+    // (페르소나를 골라 둔 상태면 그 프리셋 유지 — 예전엔 페르소나까지 무시하고 판정을 꺼서 수집 데이터가 날아갔다).
     if (intent?.action == ACTION_CLEAR_CALIBRATION) {
-      applyCalibratedThresholds(null)
       CalibrationPrefs.clearUserCalibration(agPrefs())
-      Log.i(tag, "캘리브레이션 초기화 — 판정 중단 상태로 복귀")
+      // 습관 학습도 처음부터 — 초기화는 "개인화를 전부 되돌린다"는 뜻
+      CalibrationPrefs.clearHabitState(agPrefs())
+      habitLearner = loadHabitLearner()
+      applyCalibratedThresholds(readCalibratedThresholds())
+      Log.i(tag, "캘리브레이션 초기화 — 기본 임계값으로 복귀: $calibratedThresholdsJson")
       return START_NOT_STICKY
     }
 
@@ -319,12 +376,12 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
-    // 캘리브레이션 임계값이 있으면 복원 — 매 주행마다 다시 캘리브레이션할 필요 없다.
+    // 캘리브레이션 임계값이 있으면 복원 — 매 주행마다 다시 캘리브레이션할 필요 없다. 없으면 기본값.
+    // 습관 학습값이 있으면 accel_high 는 그걸로(주행 시작 시점 적용). 서비스가 이미 떠 있으면 누적 상태를 이어간다.
+    if (habitLearner == null) habitLearner = loadHabitLearner()
     currentPersona = CalibrationPrefs.currentPersona(agPrefs())
     applyCalibratedThresholds(readCalibratedThresholds())
-    if (calibratedThresholdsJson != null) {
-      Log.i(tag, "캘리브레이션된 임계값 복원: $calibratedThresholdsJson")
-    }
+    Log.i(tag, "판정 임계값: $calibratedThresholdsJson")
 
     startForegroundServiceNotification("타겟 감시 중: $targetAddress")
     setMonitorState(MonitorState.CONNECTING)
@@ -367,6 +424,9 @@ class BleService : Service() {
     // 순서 중요: GATT 를 먼저 끊어야 뒤늦은 notify 콜백이 세션 파일을 되살리지 않는다.
     disconnectGatt()
     closeCsvWriter()   // 세션 로그 파일 flush + close
+    saveHabit()        // 주행 끝 — 마지막 1분치 누적도 남긴다
+    appliedThresholdsJson = null
+    pedalEdgeOverlay.detach()   // WRONG_DEVICE 로 끝나면 setMonitorState 를 거치지 않으므로 직접 뗀다
     // UUID 불일치로 스스로 종료한 경우엔 그 사실을 화면에 남겨 두려고 WRONG_DEVICE 유지
     if (monitorState != MonitorState.WRONG_DEVICE) setMonitorState(MonitorState.STOPPED)
     super.onDestroy()
@@ -567,20 +627,67 @@ class BleService : Service() {
 
   private fun agPrefs() = getSharedPreferences("AgPrefs", MODE_PRIVATE)
 
-  // 판정에 쓸 임계값 JSON — 개발자 페르소나를 골랐으면 그 프리셋, 아니면 사용자 캘리브레이션(없으면 null).
+  // 판정에 쓸 임계값 JSON — 개발자 페르소나 프리셋 > 사용자 캘리브레이션 > 기본값(calibration.DEFAULT_ACCEL_HIGH).
+  // 페르소나가 아니면 accel_high 는 습관 학습값이 준비된 경우 그걸로 덮는다(brake_low 등은 캘리브레이션 값 유지 —
+  // 15초 캘리브레이션은 습관보다 브레이크 예압 0점 보정에 더 의미가 있다, 2026-10-01 사용자 결정).
+  // 캘리브레이션 전에도 판정을 켜 두는 이유: 첫 주행도 보호하고, CSV 에 변화율(accel_rate)이 빠짐없이 남게.
+  // null 은 Python 호출이 실패했을 때뿐이다(그땐 판정이 꺼진다).
   private fun readCalibratedThresholds(): String? {
-    val persona = currentPersona ?: return CalibrationPrefs.userCalibration(agPrefs())
+    val persona = currentPersona
     return try {
-      Python.getInstance().getModule("peob.calibration")
-        .callAttr("preset_thresholds_json", persona.accelHigh).toString()
+      val calibration = Python.getInstance().getModule("peob.calibration")
+      if (persona != null) return calibration.callAttr("preset_thresholds_json", persona.accelHigh).toString()
+      val base = CalibrationPrefs.userCalibration(agPrefs())
+        ?: calibration.callAttr("default_thresholds_json").toString()
+      habitLearner?.callAttr("apply_json", base)?.toString() ?: base
     } catch (e: Exception) {
-      Log.e(tag, "페르소나 프리셋 생성 실패: ${e.message}", e)
+      Log.e(tag, "프리셋/기본 임계값 생성 실패: ${e.message}", e)
       null
     }
   }
 
-  // calibratedThresholdsJson, currentAccelHigh(캐시), detector 를 항상 같이 갱신 — 따로 손대면
-  // CSV의 accel_high 나 판정 상태기계가 실제 임계값과 어긋난다.
+  private fun loadHabitLearner(): PyObject? = try {
+    Python.getInstance().getModule("peob.habit")
+      .callAttr("load_learner", CalibrationPrefs.habitState(agPrefs()) ?: "")
+  } catch (e: Exception) {
+    Log.e(tag, "습관 학습 상태 복원 실패: ${e.message}", e)
+    null
+  }
+
+  // 판정 윈도우 하나를 습관 학습에 넣는다 — 사용자 본인의 정상 주행만. 패턴 파악 중(judged == null)·재현 실험·
+  // 개발자 페르소나는 일부러 세게/다르게 밟는 구간이라 뺀다. 경고 앞뒤 구간은 HabitLearner 가 스스로 뺀다.
+  private fun learnHabit(accelMedian: Double, judged: JudgeResult?, nowMs: Long) {
+    val learner = habitLearner ?: return
+    if (judged == null || currentPersona != null || currentTrialId != null) return
+    try {
+      val reachedGate = learner.callAttr("add_window", accelMedian, judged.fired).toBoolean()
+      if (reachedGate) {
+        // 첫 개인화 — 주행 중 임계값이 바뀌는 유일한 순간
+        applyCalibratedThresholds(readCalibratedThresholds())
+        Log.i(tag, "습관 학습 게이트 도달 — 임계값 적용: $calibratedThresholdsJson")
+        saveHabit()
+      } else if (nowMs - lastHabitSaveMs >= HABIT_SAVE_INTERVAL_MS) {
+        saveHabit()
+      }
+    } catch (e: Exception) {
+      Log.e(tag, "습관 학습 실패: ${e.message}", e)
+    }
+  }
+
+  private fun saveHabit() {
+    val learner = habitLearner ?: return
+    // 기기 등록 해제 직후(stopService → onDestroy)엔 prefs 를 이미 지웠으므로 되살리지 않는다
+    if (agPrefs().getString("TARGET_ADDRESS", null) == null) return
+    try {
+      CalibrationPrefs.saveHabitState(agPrefs(), learner.callAttr("to_json").toString())
+      lastHabitSaveMs = System.currentTimeMillis()
+    } catch (e: Exception) {
+      Log.e(tag, "습관 학습 상태 저장 실패: ${e.message}", e)
+    }
+  }
+
+  // calibratedThresholdsJson, currentAccelHigh(캐시), detector, 페달 테두리 브레이크 기준을 항상 같이 갱신 —
+  // 따로 손대면 CSV의 accel_high 나 판정 상태기계·테두리가 실제 임계값과 어긋난다.
   // 임계값이 바뀌면 상태기계도 새로 만든다(이전 임계값 기준의 무장/지속 상태는 이어가지 않는다).
   private fun applyCalibratedThresholds(json: String?) {
     calibratedThresholdsJson = json
@@ -589,12 +696,20 @@ class BleService : Service() {
     } catch (e: Exception) {
       null
     }
+    // 테두리의 "브레이크 밟음"도 판정과 같은 brake_low 기준(예압 offset 반영). 캘리브레이션 전엔 기본 0.10.
+    pedalStateTracker.brakePressOn = try {
+      json?.let { JSONObject(it).getDouble("brake_low") }
+    } catch (e: Exception) {
+      null
+    } ?: PedalStateTracker.PRESS_ON
     detector = try {
       json?.let { Python.getInstance().getModule("peob.judge").callAttr("new_detector", it) }
     } catch (e: Exception) {
       Log.e(tag, "판정 상태기계 생성 실패: ${e.message}", e)
       null
     }
+    appliedThresholdsJson = json
+    sendBroadcastToActivity(ACTION_THRESHOLDS_CHANGED)
   }
 
   // "패턴 파악" 시작 — 이후 CALIBRATION_DURATION_MS 동안 들어오는 원시 샘플을 모은다.
@@ -613,8 +728,9 @@ class BleService : Service() {
     Log.i(tag, "캘리브레이션 시작 (${CALIBRATION_DURATION_MS / 1000}초) — 완료 전까지 판정 중단")
   }
 
-  // 캘리브레이션 종료 — 모은 샘플을 calibration.calibrate_thresholds_json 에 넘겨
-  // 개인화된 임계값을 계산하고, 즉시 적용 + prefs 에 저장(다음 주행에도 재사용).
+  // 캘리브레이션(브레이크 영점 조절) 종료 — 모은 샘플을 calibration.zero_brake_thresholds_json 에 넘겨
+  // brake_low(예압 반영)를 계산하고, 즉시 적용 + prefs 에 저장(다음 주행에도 재사용).
+  // accel_high 는 15초로 못 잰다(2026-10-01 분석) — 기본값으로 두고 습관 학습이 덮어쓴다.
   private fun finishCalibration() {
     isCalibrating = false
     getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
@@ -624,7 +740,8 @@ class BleService : Service() {
     calibrationBuffer.clear()
 
     if (samples.isEmpty()) {
-      Log.w(tag, "캘리브레이션 실패: 수집된 샘플 없음")
+      Log.w(tag, "캘리브레이션 실패: 수집된 샘플 없음 — 이전 임계값으로 판정 재개")
+      applyCalibratedThresholds(readCalibratedThresholds())
       return
     }
 
@@ -634,7 +751,7 @@ class BleService : Service() {
 
       val thresholdsJson = Python.getInstance()
         .getModule("peob.calibration")
-        .callAttr("calibrate_thresholds_json", samplesJson.toString())
+        .callAttr("zero_brake_thresholds_json", samplesJson.toString())
         .toString()
 
       CalibrationPrefs.saveUserCalibration(agPrefs(), thresholdsJson)
@@ -645,18 +762,19 @@ class BleService : Service() {
 
       // 다른 앱으로 전환된 상태라 ACTION_CALIBRATION_DONE 브로드캐스트를 놓쳐도(§DataCollectActivity
       // onResume 재동기화로 화면은 커버됨) 완료 사실 자체는 시스템 알림으로 바로 알려준다(2026-07-14).
-      showHeadsUpNotification("PeOb", "패턴 파악이 완료되었습니다")
+      showHeadsUpNotification("PeOb", "브레이크 영점 조절이 완료되었습니다")
 
       val intent = Intent(ACTION_CALIBRATION_DONE)
       intent.setPackage(packageName)
       intent.putExtra(EXTRA_THRESHOLDS_JSON, thresholdsJson)
       sendBroadcast(intent)
     } catch (e: Exception) {
-      Log.e(tag, "캘리브레이션 계산 실패: ${e.message}", e)
+      Log.e(tag, "캘리브레이션 계산 실패: ${e.message} — 이전 임계값으로 판정 재개", e)
+      applyCalibratedThresholds(readCalibratedThresholds())
     }
   }
 
-  // judged == null: 판정을 건너뛴 윈도우(캘리브레이션 중/전) — 판정 관련 컬럼은 "none".
+  // judged == null: 판정을 건너뛴 윈도우(패턴 파악 중) — 판정 관련 컬럼은 "none".
   private fun writeRawCsv(
     recvMs: Long, accel: Double, brake: Double, accelMedian: Double, label: Int, judged: JudgeResult?,
   ) {
@@ -768,6 +886,9 @@ class BleService : Service() {
 
       liveAccels?.set(i, accel.toFloat())
       liveBrakes?.set(i, brake.toFloat())
+
+      // 200Hz 로 비교만 하고, 페달이 바뀐 순간에만 화면(메인 스레드)으로 넘긴다
+      if (pedalEdgeEnabled) pedalStateTracker.update(accel, brake)?.let(pedalEdgeOverlay::flash)
     }
 
     if (isCalibrating && nowMs - calibrationStartMs >= CALIBRATION_DURATION_MS) {
@@ -794,6 +915,7 @@ class BleService : Service() {
       val last = window.last()
       val sortedAccels = window.map { it[0] }.sorted()
       val accelMedian = sortedAccels[sortedAccels.size / 2]
+      learnHabit(accelMedian, judged, nowMs)
       writeRawCsv(nowMs, accel = last[0], brake = last[1], accelMedian = accelMedian, label = currentLabel, judged = judged)
       flushRawCsv()
     }
@@ -802,10 +924,9 @@ class BleService : Service() {
   // 윈도우 하나를 Python judge.MisopDetector 에 넘겨 판정하고, 경고 발동이면 알린다.
   // 판정 규칙과 상태(무장/지속/여유)는 전부 Python 쪽에 있다 — 여기는 호출·로그·경고 표시만 한다.
   //
-  // 패턴 파악(캘리브레이션) 중이거나, 아직 한 번도 캘리브레이션한 적이 없으면
-  // 판정 자체를 건너뛴다(null 반환) — 그렇지 않으면 캘리브레이션 도중 세게 밟는 순간에
-  // 오조작 경고가 떠서 데이터 수집이 불편해진다.
-  // "임계값 미설정 = 아직 판정 안 함"이 지금 채택한 모델이다.
+  // 패턴 파악(캘리브레이션) 중에는 판정 자체를 건너뛴다(null 반환) — 그렇지 않으면 캘리브레이션 도중
+  // 세게 밟는 순간에 오조작 경고가 떠서 데이터 수집이 불편해진다.
+  // 캘리브레이션 전에는 기본 임계값으로 판정한다(2026-10-01 — 예전엔 "임계값 미설정 = 판정 안 함"이었다).
   private fun judgeWindow(window: List<List<Double>>): JudgeResult? {
     if (isCalibrating) return null
     val det = detector ?: return null
@@ -971,7 +1092,19 @@ class BleService : Service() {
     if (monitorState == state) return
     monitorState = state
     Log.i(tag, "감시 상태: $state")
+    updatePedalEdgeOverlay()
     sendBroadcastToActivity(ACTION_MONITOR_STATE)
+  }
+
+  // 감시 중이고 설정이 켜져 있고 경고 화면이 없을 때만 테두리 창을 붙인다. 떼는 경우엔 트래커도 비워,
+  // 다시 붙었을 때 첫 밟음이 "전환"으로 잡히게 한다.
+  private fun updatePedalEdgeOverlay() {
+    if (pedalEdgeEnabled && !criticalShowing && monitorState == MonitorState.MONITORING) {
+      pedalEdgeOverlay.attach()
+    } else {
+      pedalEdgeOverlay.detach()
+      pedalStateTracker.reset()
+    }
   }
 
   private fun sendBroadcastToActivity(action: String) {

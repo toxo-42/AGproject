@@ -94,7 +94,7 @@
         android:textColor="?attr/colorOnSurfaceVariant"
         app:layout_constraintBottom_toTopOf="@id/btnCalibrate" />
 
-    <!-- 연속형 개인화 캘리브레이션("패턴 파악") — 캘리브레이션 시간 동안 실주행 패턴을 모아 accel_high를 개인화 -->
+    <!-- 브레이크 영점 조절(15초) — 발을 뗀 상태의 브레이크 바닥값으로 brake_low(예압) 를 잡는다 -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnCalibrate"
         android:layout_width="0dp"
@@ -105,7 +105,7 @@
         app:layout_constraintEnd_toStartOf="@id/btnResetCalibration"
         app:layout_constraintHorizontal_chainStyle="packed" />
 
-    <!-- 캘리브레이션 초기화 — 삭제 후 재설치한 것처럼 되돌려 다시 패턴 파악하게 한다 -->
+    <!-- 학습 초기화 — 브레이크 영점 + 습관 학습을 지워 처음 설치한 상태로 -->
     <ImageButton
         android:id="@+id/btnResetCalibration"
         android:layout_width="@dimen/button_height"

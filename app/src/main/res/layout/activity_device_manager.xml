@@ -45,8 +45,8 @@
     <ImageButton
         android:id="@+id/btnOpenSettings"
         style="@style/Widget.PeOb.IconButton"
-        android:src="@drawable/ic_volume_up"
-        android:contentDescription="Settings" />
+        android:src="@drawable/ic_settings"
+        android:contentDescription="@string/desc_open_settings" />
   </LinearLayout>
 
   <!-- 기기 정보 (읽기 전용) -->

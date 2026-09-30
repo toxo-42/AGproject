@@ -32,8 +32,9 @@ class PedalGraphView @JvmOverloads constructor(
     // 200Hz × 5초 = 1000샘플. 페달을 한 번 밟고 떼는 동작이 화면에 딱 들어온다.
     const val CAPACITY = 1000
 
-    // 캘리브레이션 전/초기화 직후에 쓰는 임시 참고선(실제 판정 임계값이 아니라 눈대중 표시용).
-    const val DEFAULT_ACCEL_HIGH = 0.85
+    // 캘리브레이션 전/초기화 직후의 임계선 — 이때 실제 판정도 이 기본값으로 한다(2026-10-01부터).
+    // backend calibration.DEFAULT_ACCEL_HIGH 와 같은 값으로 유지할 것.
+    const val DEFAULT_ACCEL_HIGH = 0.75
     const val DEFAULT_BRAKE_LOW = 0.10
   }
 

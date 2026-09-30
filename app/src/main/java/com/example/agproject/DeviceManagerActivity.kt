@@ -2,7 +2,9 @@ package com.example.agproject
 
 import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.widget.Button
 import android.widget.EditText
@@ -15,6 +17,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.materialswitch.MaterialSwitch
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -59,10 +62,10 @@ class DeviceManagerActivity : AppCompatActivity() {
       true
     }
 
-    // 3. 설정 버튼 연결
+    // 3. 설정 버튼 연결 (톱니 아이콘 → 설정 다이얼로그 → 음성 안내 설정 등)
     val btnOpenSettings = findViewById<ImageButton>(R.id.btnOpenSettings)
     btnOpenSettings.setOnClickListener {
-      showTTSSettingsDialog()
+      showSettingsDialog()
     }
 
     // 로깅 데이터 추출(Phase E) — 세션 선택 후 CSV를 공유 시트로 내보낸다.
@@ -125,6 +128,36 @@ class DeviceManagerActivity : AppCompatActivity() {
       Toast.makeText(this, "UUID 확인용 토스트", Toast.LENGTH_SHORT).show()
       true
     }
+  }
+
+  // 설정 다이얼로그 — 설정 항목이 늘면 dialog_settings.xml 에 한 줄씩 추가한다.
+  private fun showSettingsDialog() {
+    val dialogView = layoutInflater.inflate(R.layout.dialog_settings, null)
+    val dialog = AlertDialog.Builder(this).setView(dialogView).create()
+    dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    val swPedalEdge = dialogView.findViewById<MaterialSwitch>(R.id.swPedalEdge)
+    swPedalEdge.isChecked = prefs.getBoolean(BleService.PREF_PEDAL_EDGE_ENABLED, true)
+    swPedalEdge.setOnCheckedChangeListener { _, checked ->
+      prefs.edit().putBoolean(BleService.PREF_PEDAL_EDGE_ENABLED, checked).apply()
+      if (BleService.monitorState.isActive) {
+        startService(Intent(this, BleService::class.java).apply { action = BleService.ACTION_SET_PEDAL_EDGE })
+      }
+      // 켰는데 오버레이 권한이 없으면 테두리가 안 보인다 — 권한 화면으로 안내
+      if (checked && !Settings.canDrawOverlays(this)) {
+        Toast.makeText(this, R.string.msg_overlay_permission_needed, Toast.LENGTH_LONG).show()
+        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+      }
+    }
+
+    dialogView.findViewById<Button>(R.id.btnOpenTtsSettings).setOnClickListener {
+      dialog.dismiss()
+      showTTSSettingsDialog()
+    }
+    dialogView.findViewById<Button>(R.id.btnCloseSettings).setOnClickListener { dialog.dismiss() }
+
+    dialog.show()
   }
 
   // 성별 선택 기능 추가된 팝업 함수

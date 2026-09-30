@@ -58,7 +58,6 @@ class TrialActivity : AppCompatActivity() {
   private var lastActionRep = 0
   private var timer: CountDownTimer? = null
   private val detectedReps = mutableSetOf<Int>()
-  private var detectionReady = false
 
   private val firedReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
@@ -171,7 +170,6 @@ class TrialActivity : AppCompatActivity() {
       Toast.makeText(this, R.string.trial_need_monitoring, Toast.LENGTH_LONG).show()
       return
     }
-    detectionReady = CalibrationPrefs.isDetectionReady(getSharedPreferences("AgPrefs", MODE_PRIVATE))
     runId = SimpleDateFormat("HHmmss", Locale.US).format(Date())
     steps = buildTrialSchedule(selectedType, reps)
     stepIndex = 0
@@ -246,11 +244,6 @@ class TrialActivity : AppCompatActivity() {
   private fun showSummary(summary: TrialSummary) {
     showSection(layoutSummary)
     tvSummaryType.text = getString(summary.type.nameRes)
-    if (!detectionReady) {
-      tvSummary.text = getString(R.string.trial_reps, summary.reps)
-      tvSummaryDetail.setText(R.string.trial_summary_detection_off)
-      return
-    }
     if (summary.type.isMisop) {
       tvSummary.text = getString(R.string.trial_summary_misop, summary.reps, summary.detectedCount)
       tvSummaryDetail.text = summary.missedReps.takeIf { it.isNotEmpty() }

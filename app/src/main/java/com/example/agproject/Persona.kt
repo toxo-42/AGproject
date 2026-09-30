@@ -2,6 +2,7 @@ package com.example.agproject
 
 import android.content.SharedPreferences
 import androidx.annotation.StringRes
+import org.json.JSONObject
 
 /**
  * 개발자 학습 데이터 수집용 운전 페르소나 — 한 사람이 운전 스타일을 연기해 데이터를 모을 때 쓴다.
@@ -34,6 +35,8 @@ enum class Persona(val id: String, @StringRes val labelRes: Int, val accelHigh: 
 object CalibrationPrefs {
   private const val KEY_PERSONA_ID = "DEV_PERSONA_ID"
   private const val KEY_USER_CALIBRATION = "CALIBRATED_THRESHOLDS_JSON"
+  // 주행 중 누적 학습 상태(peob.habit.HabitLearner.to_json) — 주행을 넘어 이어진다.
+  private const val KEY_HABIT_STATE = "HABIT_STATE_JSON"
 
   // 페르소나별 캘리브레이션을 저장하던 시절(2026-09-25, 0008b91)의 키 — 이제 안 쓰고 정리할 때만 지운다.
   private const val LEGACY_KEY_PERSONA_CALIBRATION_PREFIX = "CALIBRATED_THRESHOLDS_JSON_"
@@ -48,7 +51,7 @@ object CalibrationPrefs {
     }.apply()
   }
 
-  /** 사용자 본인 캘리브레이션 임계값 JSON. 아직 패턴 파악 전이면 null. */
+  /** 사용자 본인 캘리브레이션(브레이크 영점 조절) 임계값 JSON. 아직 영점 조절 전이면 null. */
   fun userCalibration(prefs: SharedPreferences): String? = prefs.getString(KEY_USER_CALIBRATION, null)
 
   fun saveUserCalibration(prefs: SharedPreferences, thresholdsJson: String) {
@@ -59,14 +62,39 @@ object CalibrationPrefs {
     prefs.edit().remove(KEY_USER_CALIBRATION).apply()
   }
 
-  /** 오조작 판정이 가능한 상태인가 — 페르소나 프리셋이 있거나 사용자 캘리브레이션을 마쳤으면 true */
-  fun isDetectionReady(prefs: SharedPreferences): Boolean =
-    currentPersona(prefs) != null || userCalibration(prefs) != null
+  /** 엑셀 임계값이 개인 맞춤인가 — 페르소나 프리셋이 있거나 습관 학습이 게이트를 통과했으면 true.
+   *  사용자 캘리브레이션(브레이크 영점 조절)은 brake_low 만 정하므로 여기 포함하지 않는다.
+   *  false 여도 판정은 기본 임계값으로 켜져 있다(2026-10-01, BleService.readCalibratedThresholds). */
+  fun isPersonalized(prefs: SharedPreferences): Boolean =
+    currentPersona(prefs) != null || habitProgress(prefs)?.ready == true
+
+  fun habitState(prefs: SharedPreferences): String? = prefs.getString(KEY_HABIT_STATE, null)
+
+  fun saveHabitState(prefs: SharedPreferences, stateJson: String) {
+    prefs.edit().putString(KEY_HABIT_STATE, stateJson).apply()
+  }
+
+  fun clearHabitState(prefs: SharedPreferences) {
+    prefs.edit().remove(KEY_HABIT_STATE).apply()
+  }
+
+  /** 화면 표시용 습관 학습 진행도("습관 학습 중 N/100"). 학습 기록이 없으면 null. */
+  fun habitProgress(prefs: SharedPreferences): HabitProgress? {
+    val json = habitState(prefs) ?: return null
+    return try {
+      JSONObject(json).let { HabitProgress(it.getInt("events"), it.getInt("gate"), it.getBoolean("ready")) }
+    } catch (e: Exception) {
+      null
+    }
+  }
 
   /** 센서 모듈이 바뀌면 캘리브레이션이 무효 — 지운다(옛 페르소나별 키도 함께 정리). */
   fun clearAllCalibrations(editor: SharedPreferences.Editor): SharedPreferences.Editor {
     editor.remove(KEY_USER_CALIBRATION)
+    editor.remove(KEY_HABIT_STATE)
     Persona.entries.forEach { editor.remove(LEGACY_KEY_PERSONA_CALIBRATION_PREFIX + it.id) }
     return editor
   }
 }
+
+data class HabitProgress(val events: Int, val gate: Int, val ready: Boolean)

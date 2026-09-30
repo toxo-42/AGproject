@@ -64,6 +64,8 @@ class DataCollectActivity : AppCompatActivity() {
             )
           }
         }
+        // 습관 학습 게이트 도달·페르소나 변경 등으로 서비스가 적용한 임계값이 바뀌면 그래프도 따라간다
+        BleService.ACTION_THRESHOLDS_CHANGED -> BleService.appliedThresholdsJson?.let(::applyThresholdsToGraph)
         BleService.ACTION_CALIBRATION_DONE -> {
           val json = intent.getStringExtra(BleService.EXTRA_THRESHOLDS_JSON) ?: return
           onCalibrationDone(json)
@@ -105,6 +107,7 @@ class DataCollectActivity : AppCompatActivity() {
     val filter = IntentFilter().apply {
       addAction(BleService.ACTION_LIVE_SAMPLES)
       addAction(BleService.ACTION_CALIBRATION_DONE)
+      addAction(BleService.ACTION_THRESHOLDS_CHANGED)
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       registerReceiver(liveReceiver, filter, RECEIVER_NOT_EXPORTED)
@@ -183,7 +186,7 @@ class DataCollectActivity : AppCompatActivity() {
     }
   }
 
-  // dev mode 에서 페르소나를 골라 뒀으면: 제목에 표시(지금 누구로 기록되는지) + 패턴 파악 버튼 숨김
+  // dev mode 에서 페르소나를 골라 뒀으면: 제목에 표시(지금 누구로 기록되는지) + 영점 조절 버튼 숨김
   // (프리셋을 쓰므로 캘리브레이션이 필요 없고, 누르면 사용자 본인 캘리브레이션을 덮어쓰게 되므로).
   // INVISIBLE 로 숨겨 tvLegend 등 나머지 레이아웃 제약이 흔들리지 않게 한다.
   private fun applyPersonaUi() {
@@ -201,7 +204,7 @@ class DataCollectActivity : AppCompatActivity() {
   private fun currentDevPersona(): Persona? =
     if (devMode) CalibrationPrefs.currentPersona(getSharedPreferences("AgPrefs", MODE_PRIVATE)) else null
 
-  // --- 연속형 개인화 캘리브레이션("패턴 파악") ---
+  // --- 브레이크 영점 조절(옛 "패턴 파악") ---
 
   private fun startCalibrationFlow() {
     startService(Intent(this, BleService::class.java).apply {
@@ -258,16 +261,20 @@ class DataCollectActivity : AppCompatActivity() {
     btnCalibrate.setText(R.string.btn_calibrate)
     applyThresholdsToGraph(thresholdsJson)
     try {
-      val accelHigh = JSONObject(thresholdsJson).getDouble("accel_high")
-      Toast.makeText(this, getString(R.string.msg_calibration_done, accelHigh), Toast.LENGTH_LONG).show()
+      val brakeLow = JSONObject(thresholdsJson).getDouble("brake_low")
+      Toast.makeText(this, getString(R.string.msg_calibration_done, brakeLow), Toast.LENGTH_LONG).show()
     } catch (e: Exception) {
       Log.e(tag, "캘리브레이션 결과 파싱 실패: ${e.message}", e)
     }
   }
 
-  // 이미 캘리브레이션된 값이 있으면(다음 주행 재사용 케이스) 화면 진입 시 바로 그래프에 반영한다.
-  // 없으면 PedalGraphView 기본값(0.85/0.10)이 임시 참고선으로 남는다.
+  // 화면 진입 시 그래프 임계선을 맞춘다. 서비스가 판정 중이면 실제 적용값(습관 학습 반영)을 그대로 그리고,
+  // 꺼져 있거나 패턴 파악 중이면 prefs 로 추정한다(없으면 PedalGraphView 기본값).
   private fun showExistingCalibration() {
+    BleService.appliedThresholdsJson?.let {
+      applyThresholdsToGraph(it)
+      return
+    }
     // 개발자 페르소나를 골라 뒀으면 그 프리셋 임계선을 그린다(brake_low 는 기본값)
     currentDevPersona()?.let {
       graph.setThresholds(it.accelHigh, PedalGraphView.DEFAULT_BRAKE_LOW)
@@ -287,7 +294,7 @@ class DataCollectActivity : AppCompatActivity() {
     }
   }
 
-  // 초기화하면 오조작 감지가 다시 꺼지므로(캘리브레이션 전 = 판정 안 함) 확인을 받는다.
+  // 초기화하면 개인 맞춤 임계값이 사라지고 기본값으로 돌아가므로 확인을 받는다.
   private fun confirmResetCalibration() {
     androidx.appcompat.app.AlertDialog.Builder(this)
       .setTitle(R.string.title_reset_calibration_confirm)

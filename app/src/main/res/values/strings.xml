@@ -44,7 +44,6 @@
   <string name="trial_summary_misop">%1$d회 중 %2$d회 감지</string>
   <string name="trial_summary_normal">%1$d회 중 %2$d회 오탐</string>
   <string name="trial_summary_missed">놓친 회차: %1$s</string>
-  <string name="trial_summary_detection_off">판정 꺼짐(페르소나·패턴 파악 없음) — 감지 요약 없음</string>
   <string name="trial_need_monitoring">감시가 켜져 있고 연결된 상태(감시 중)에서만 시작할 수 있어요</string>
   <string name="trial_aborted">실험을 중단했어요 — 여기까지 기록됨</string>
   <string name="trial_persona_line">페르소나 · %1$s</string>
@@ -58,8 +57,10 @@
   <string name="monitor_reconnecting">재연결 중…</string>
   <string name="monitor_wrong_device">잘못된 기기</string>
   <string name="msg_wrong_device">UUID 불일치 — 기기를 다시 검색하세요</string>
-  <string name="calibration_done">패턴 파악 완료</string>
-  <string name="calibration_needed">패턴 파악 필요 · 오조작 감지 꺼짐  ›</string>
+  <string name="calibration_done">개발자 페르소나 프리셋 적용 중</string>
+  <string name="calibration_needed">기본값으로 감지 중 · 운전하면 습관을 학습해요  ›</string>
+  <string name="calibration_needed_learning">기본값으로 감지 중 · 습관 학습 %1$d/%2$d  ›</string>
+  <string name="calibration_habit_ready">내 운전 습관 반영됨</string>
   <string name="btn_start_monitor">감시 시작</string>
   <string name="btn_stop_monitor">감시 중지</string>
 
@@ -85,9 +86,9 @@
   <string name="desc_back_button">뒤로 가기</string>
   <string name="desc_device_icon">기기 아이콘</string>
 
-  <!-- 데이터 수집(Phase A): 캘리브레이션 -->
-  <string name="title_data_collect">데이터 수집</string>
-  <string name="btn_data_collect">데이터 수집 (Collect)</string>
+  <!-- 페달 입력 그래프(사용자) — 버튼을 길게 누르면 개발자 모드(학습 데이터 수집) -->
+  <string name="title_data_collect">페달 입력 그래프</string>
+  <string name="btn_data_collect">페달 입력 그래프</string>
   <string name="live_values_idle">accel  —      brake  —</string>
   <string name="graph_legend">🟢 accel     🔵 brake    🔴 붉은 실선: 엑셀 임계값</string>
 
@@ -110,21 +111,30 @@
   <!-- 개발자 전용 학습 데이터 수집 (데이터 수집 버튼 길게 눌러 진입) -->
   <string name="msg_dev_mode_entered">개발자 모드: 학습 데이터 수집</string>
 
-  <!-- 연속형 개인화 캘리브레이션(Phase B "패턴 파악") -->
-  <string name="btn_calibrate">패턴 파악 시작 </string>
-  <string name="btn_calibrate_running">패턴 파악 중… %1$d초</string>
-  <string name="msg_calibration_done">캘리브레이션 완료: 엑셀 임계값 %1$.2f 적용됨</string>
-  <string name="desc_reset_calibration">캘리브레이션 초기화</string>
-  <string name="title_reset_calibration_confirm">캘리브레이션을 초기화할까요?</string>
-  <string name="msg_reset_calibration_confirm">패턴 파악 데이터가 삭제되고, 다시 패턴 파악하기 전까지 오조작 감지가 꺼집니다.</string>
+  <!-- 브레이크 영점 조절(15초, 옛 "패턴 파악") — brake_low 만 정한다. 엑셀 습관은 주행 중 자동 학습 -->
+  <string name="btn_calibrate">브레이크 영점 조절</string>
+  <string name="btn_calibrate_running">영점 조절 중… 발을 떼세요 %1$d초</string>
+  <string name="msg_calibration_done">브레이크 영점 조절 완료: 브레이크 기준 %1$.2f</string>
+  <string name="desc_reset_calibration">학습 초기화</string>
+  <string name="title_reset_calibration_confirm">학습을 초기화할까요?</string>
+  <string name="msg_reset_calibration_confirm">브레이크 영점과 지금까지 학습한 운전 습관이 모두 삭제되고, 다시 학습될 때까지 기본값으로 오조작을 감지합니다.</string>
   <string name="btn_reset_calibration_confirm">초기화</string>
-  <string name="msg_reset_calibration_done">캘리브레이션이 초기화됐습니다</string>
+  <string name="msg_reset_calibration_done">학습이 초기화됐습니다</string>
 
-  <!-- 캘리브레이션 온보딩: 연결 성공 시 아직 캘리브레이션 전이면 뜨는 팝업 -->
-  <string name="title_calibration_onboarding">패턴 파악이 필요합니다</string>
-  <string name="msg_calibration_onboarding">아직 이 기기에서 운전 습관을 파악한 적이 없습니다.\n페달 오조작 감지가 동작하려면 먼저 패턴 파악이 필요합니다.</string>
-  <string name="btn_calibration_onboarding_start">지금 패턴 파악하기</string>
+  <!-- 연결 성공 시 아직 브레이크 영점 조절 전이면 뜨는 안내 팝업 -->
+  <string name="title_calibration_onboarding">브레이크 영점 조절을 권장합니다</string>
+  <string name="msg_calibration_onboarding">발을 뗀 상태에서 브레이크 영점 조절을 한 번 해 주세요.\n운전 습관은 평소처럼 10분 정도 운전하면 자동으로 학습됩니다.</string>
+  <string name="btn_calibration_onboarding_start">영점 조절하러 가기</string>
+  <string name="btn_calibration_onboarding_later">나중에</string>
   <!-- 오조작 경고 화면 페달 그림(PedalGuideView) 라벨 -->
   <string name="critical_label_brake">BRAKE</string>
   <string name="critical_label_accel">ACCEL</string>
+  <!-- 설정 다이얼로그 (기기 관리 화면 톱니 아이콘) -->
+  <string name="desc_open_settings">설정</string>
+  <string name="title_settings">설정</string>
+  <string name="label_pedal_edge">페달 테두리 표시</string>
+  <string name="desc_pedal_edge">페달을 바꿔 밟으면 다른 앱 위에도 화면 가장자리가 잠깐 빛나요 (엑셀 초록 · 브레이크 파랑)</string>
+  <string name="btn_tts_settings">음성 안내 설정</string>
+  <string name="btn_close">닫기</string>
+  <string name="msg_overlay_permission_needed">\'다른 앱 위에 표시\' 권한을 허용해야 테두리가 보여요</string>
 </resources>
