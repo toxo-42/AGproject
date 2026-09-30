@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import json
 
-from peob.calibration import calibrate_thresholds, preset_thresholds, preset_thresholds_json
+from peob.calibration import (
+    DEFAULT_ACCEL_HIGH,
+    calibrate_thresholds,
+    default_thresholds,
+    default_thresholds_json,
+    preset_thresholds,
+    preset_thresholds_json,
+    zero_brake_thresholds,
+    zero_brake_thresholds_json,
+)
 from peob.judge import judge_with_thresholds
 
 
@@ -41,3 +50,17 @@ def test_offset_brake_does_not_block_misop_after_calibration():
     window = [[1.0, 0.2]] * 50
     assert judge_with_thresholds(window, th, "t")["misop"] is True
 
+
+def test_default_is_preset_with_default_accel_high():
+    assert default_thresholds() == preset_thresholds(DEFAULT_ACCEL_HIGH)
+    assert json.loads(default_thresholds_json()) == default_thresholds()
+
+
+def test_zero_brake_sets_only_brake_low():
+    # 예압 0.2 인 채로 영점 조절 → brake_low 만 0.3, accel_high 등은 기본값(엑셀은 습관 학습이 정한다)
+    th = zero_brake_thresholds([[0.6, 0.2]] * 200)
+    assert th["brake_low"] == 0.3
+    assert {k: v for k, v in th.items() if k != "brake_low"} == {
+        k: v for k, v in default_thresholds().items() if k != "brake_low"}
+    assert zero_brake_thresholds([[0.0, 0.0]] * 200)["brake_low"] == 0.10
+    assert json.loads(zero_brake_thresholds_json(json.dumps([[0.0, 0.2]] * 200))) == zero_brake_thresholds([[0.0, 0.2]] * 200)
