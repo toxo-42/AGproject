@@ -99,7 +99,7 @@ def extract_features(
     """
     keys = [
         "accel_mean", "accel_std", "accel_p90",
-        "brake_mean", "brake_std",
+        "brake_mean", "brake_std", "brake_p90",
         "max_accel_jump",
         "simultaneous_press_ratio",
         "accel_active_mean", "accel_active_p90",
@@ -142,6 +142,7 @@ def extract_features(
         "accel_p90": round(_percentile(accels, 90), 4),
         "brake_mean": round(_mean(brakes), 4),
         "brake_std": round(_std(brakes), 4),
+        "brake_p90": round(_percentile(brakes, 90), 4),
         "max_accel_jump": round(max_accel_jump, 4),
         "simultaneous_press_ratio": round(sim_hits / len(samples), 4),
         "accel_active_mean": round(accel_active_mean, 4),

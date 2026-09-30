@@ -20,8 +20,9 @@ judge.py 의 judge_with_thresholds() 가 기대하는 형태
    놓치지 않고 잡아내는가"(민감도)는 아직 미검증이다 — 오조작 라벨 데이터가
    생기면 반드시 재검증 필요.
 
-   brake_low/high_ratio 는 아직 개인화 실험 전이라 기존 PROFILES["normal"]
-   값을 그대로 재사용한다(임시).
+   high_ratio 는 아직 개인화 실험 전이라 기존 PROFILES["normal"]
+   값을 그대로 재사용한다(임시). brake_low 는 2026-09-30 부터 캘리브레이션 중
+   브레이크 기준값(offset)을 반영한다(BRAKE_LOW_MARGIN 주석 참고).
 
 ⚠️ 오프셋 재조정 (2026-07-13, 실기기 캘리브레이션 후 사용자 피드백):
    accel 0.6~0.7 유지하며 캘리브레이션했더니 accel_high=0.84 로 잡혔는데,
@@ -42,8 +43,19 @@ from .features import extract_features
 # 2026-07-13 재조정: 0.10 -> 0.20 (평소 범위와 슬램 사이 여유 확보, 위 모듈 docstring 참고).
 ACCEL_HIGH_OFFSET = 0.20
 
-# brake_low/high_ratio/accel_rate_high 는 아직 개인화 안 함 — PROFILES["normal"]과 동일한 임시값.
+# high_ratio/accel_rate_high 는 아직 개인화 안 함 — PROFILES["normal"]과 동일한 임시값.
+# DEFAULT_BRAKE_LOW 는 브레이크 offset 이 없을 때의 하한(= 기존 고정값)으로 계속 쓴다.
 DEFAULT_BRAKE_LOW = 0.10
+
+# brake_low = max(DEFAULT_BRAKE_LOW, 캘리브레이션 중 brake_p90 + 이 값).
+# ⚠️ 2026-09-30 실차 부착 테스트: 케이스를 브레이크 페달에 고정하는 압력(또는 케이스 모델링) 때문에
+#   발을 뗀 상태에서도 브레이크 값이 ~0.2 로 떠 있었다. 고정 brake_low=0.10 이면 모든 샘플이
+#   "브레이크 밟음"으로 탈락해 misop 이 영영 안 떠서 캘리브레이션 후에도 경고가 안 났다.
+#   offset 은 부착할 때마다 달라질 수 있어 하드코딩하지 않고, 캘리브레이션(브레이크에서 발을 뗀 상태)의
+#   브레이크 분포를 그 부착 상태의 0점으로 보고 이 여유만큼 위를 기준선으로 잡는다.
+#   offset 이 없으면 max() 로 기존 0.10 이 그대로 유지된다. 여유값은 실측 튜닝 전 임시값.
+BRAKE_LOW_MARGIN = 0.10
+
 DEFAULT_HIGH_RATIO = 0.50
 DEFAULT_ACCEL_RATE_HIGH = 0.30
 
@@ -55,9 +67,10 @@ def calibrate_thresholds(samples: list[list[float]]) -> dict[str, float]:
     """
     f = extract_features(samples)
     accel_high = min(f["accel_active_p90"] + ACCEL_HIGH_OFFSET, 1.0)
+    brake_low = min(max(DEFAULT_BRAKE_LOW, f["brake_p90"] + BRAKE_LOW_MARGIN), 1.0)
     return {
         "accel_high": round(accel_high, 4),
-        "brake_low": DEFAULT_BRAKE_LOW,
+        "brake_low": round(brake_low, 4),
         "high_ratio": DEFAULT_HIGH_RATIO,
         "accel_rate_high": DEFAULT_ACCEL_RATE_HIGH,
     }

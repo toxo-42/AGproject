@@ -278,7 +278,9 @@ def evaluate(session: Session, rule: LearnedThresholds | CurrentRule, baselines:
         if row.trial_type in (TRIAL_HARD_NORMAL, TRIAL_SLOW_DEEP) and row.trial_id is not None:
             normal_trials[row.trial_id] = normal_trials.get(row.trial_id, False) or fired[i]
 
-    driving_rows = [i for i, row in enumerate(rows) if row.is_normal_driving and row.trial_type is None and not near[i]]
+    # 변화율이 없는 행(판정이 꺼져 있던 구간)은 트리거를 복원할 수 없어 경고가 항상 0 → 오경보율이 희석되므로 뺀다
+    driving_rows = [i for i, row in enumerate(rows)
+                    if row.is_normal_driving and row.trial_type is None and row.rate is not None and not near[i]]
     return Evaluation(
         events=len(events),
         detected=detected,

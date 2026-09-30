@@ -6,6 +6,7 @@ from dataset import Row, Session, parse_rows
 from train_thresholds import (
     CurrentRule,
     Evaluation,
+    evaluate,
     learn,
     misop_events,
     replay,
@@ -112,6 +113,14 @@ def test_replay_ignores_slow_deep_press_without_trigger():
     rows = [_row(0.1 + 0.1 * i, rate=0.05) for i in range(10)] + [_row(1.0, rate=0.0)] * 8
     fired = replay(Session("s", rows, True), CurrentRule(), {"normal": 0.6})
     assert sum(fired) == 0
+
+
+def test_driving_hours_exclude_rows_without_rate():
+    # 판정이 꺼져 accel_rate 가 비는 구간은 트리거를 복원할 수 없어 경고가 0으로 나온다 —
+    # 이 구간을 주행 시간에 넣으면 시간당 오경보가 실제보다 낮게 희석된다(2026-09-26 초기화 사고)
+    rows = [_row(0.3, rate=0.02)] * 40 + [_row(0.3, rate=None)] * 120
+    result = evaluate(Session("s", rows, True), CurrentRule(), {"normal": 0.6})
+    assert result.driving_hours == 40 / 4.0 / 3600
 
 
 def test_adopt_only_when_better_or_equal_on_every_metric():
