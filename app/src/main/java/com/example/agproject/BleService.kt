@@ -66,7 +66,7 @@ class BleService : Service() {
   // 첫 윈도우가 찰 때 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
   // 저장 위치: filesDir/logs/pedal_yyyyMMdd_HHmmss.csv (권한 불필요, adb pull 로 회수)
   // 컬럼: date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,
-  //        consecutive,label,persona,trial_id,trial_type,trial_phase,accel_median
+  //        consecutive,label,persona,trial_id,trial_type,trial_phase,accel_median,speed_kmh,speed_acc_kmh
   //   (2026-07-17 accel_exceed 제거 + label→accel_high 교체 / 2026-07-18 label 재도입,
   //   accel_rate 추가, accel_score/armed/consecutive 추가(긴 홀드 오조작 미탐지 원인 진단용,
   //   §진행상황_및_로드맵.md 참고) / 2026-09-25 style(강/보통/약) → persona(Persona.id, 미선택 "none") 교체
@@ -74,6 +74,8 @@ class BleService : Service() {
   //   / 2026-09-25 trial_id,trial_type,trial_phase 추가(안내형 재현 실험 — Trial.kt, 실험 밖이면 "none")
   //   / 2026-09-26 accel_median 추가(윈도우 엑셀 중앙값 — accel 은 마지막 샘플 하나라 판정의 "윈도우 50% 이상
   //   초과"와 어긋난다. 중앙값 >= 임계값이면 정확히 그 조건과 같아서 임계값 학습에 쓴다, prototype/train_thresholds.py)
+  //   / 2026-10-25 speed_kmh,speed_acc_kmh 추가(GPS 차량 속도와 그 오차 — 운전 성향 진단 Phase F-2, SpeedTracker.kt.
+  //   GPS 는 1Hz 라 4Hz 행에선 같은 값이 반복된다. 권한 없음/fix 없음/3초 이상 끊김이면 "none". 좌표는 안 남긴다)
   //   - 기록 주기는 200Hz 원시 샘플 전부가 아니라 **판정 윈도우 하나당 1행(4Hz)**이다.
   //     pedal_err/accel_high 가 애초에 4Hz 단위라 200Hz로 찍어도 값이 반복될 뿐이고,
   //     증거자료로서 사람이 열어볼 수 있는 크기가 더 중요하다고 판단(2026-07-13 사용자 결정,
@@ -142,6 +144,7 @@ class BleService : Service() {
   // 오조작 경고 화면(CriticalActivity)이 보이는 동안 true — 경고 위에 초록/파랑이 겹치지 않게 테두리를 뗀다.
   @Volatile private var criticalShowing = false
   private lateinit var pedalEdgeOverlay: PedalEdgeOverlay
+  private lateinit var speedTracker: SpeedTracker
   private val pedalStateTracker = PedalStateTracker()
 
   // ── 로그 스로틀링 ────────────────────────────────────────────────
@@ -279,6 +282,7 @@ class BleService : Service() {
     super.onCreate()
     createNotificationChannel()
     pedalEdgeOverlay = PedalEdgeOverlay(this)
+    speedTracker = SpeedTracker(this)
     pedalEdgeEnabled = agPrefs().getBoolean(PREF_PEDAL_EDGE_ENABLED, true)
     val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
     bluetoothAdapter = bluetoothManager.adapter
@@ -384,6 +388,7 @@ class BleService : Service() {
     Log.i(tag, "판정 임계값: $calibratedThresholdsJson")
 
     startForegroundServiceNotification("타겟 감시 중: $targetAddress")
+    speedTracker.start()   // 포그라운드 진입 후에 시작해야 백그라운드에서도 위치를 받는다
     setMonitorState(MonitorState.CONNECTING)
     startTargetScan()
 
@@ -424,6 +429,7 @@ class BleService : Service() {
     // 순서 중요: GATT 를 먼저 끊어야 뒤늦은 notify 콜백이 세션 파일을 되살리지 않는다.
     disconnectGatt()
     closeCsvWriter()   // 세션 로그 파일 flush + close
+    speedTracker.stop()
     saveHabit()        // 주행 끝 — 마지막 1분치 누적도 남긴다
     appliedThresholdsJson = null
     pedalEdgeOverlay.detach()   // WRONG_DEVICE 로 끝나면 setMonitorState 를 거치지 않으므로 직접 뗀다
@@ -614,7 +620,7 @@ class BleService : Service() {
       val file = java.io.File(dir, "pedal_${ts}.csv")
       java.io.BufferedWriter(java.io.FileWriter(file, true)).also {
         it.write(
-          "date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,consecutive,label,persona,trial_id,trial_type,trial_phase,accel_median\n"
+          "date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,consecutive,label,persona,trial_id,trial_type,trial_phase,accel_median,speed_kmh,speed_acc_kmh\n"
         )
         csvWriter = it
         Log.i(tag, "RAW 로깅 시작: ${file.absolutePath}")
@@ -792,6 +798,9 @@ class BleService : Service() {
         val accelScoreStr = judged?.let { String.format(Locale.US, "%.4f", it.score) } ?: "none"
         val armedStr = judged?.armed?.toString() ?: "none"
         val consecutiveStr = judged?.consecutive?.toString() ?: "none"
+        val speed = speedTracker.current()
+        val speedStr = speed?.let { String.format(Locale.US, "%.1f", it.kmh) } ?: "none"
+        val speedAccStr = speed?.accuracyKmh?.let { String.format(Locale.US, "%.1f", it) } ?: "none"
         // accel/brake 는 소수 4자리로 반올림(Q31 원본보다 촘촘할 필요 없음 → 줄 크기 안정).
         w.write(
           "${csvDateFormat.format(d)},${csvTimeFormat.format(d)}," +
@@ -799,7 +808,7 @@ class BleService : Service() {
             "$moduleErr,$pedalErr,$accelHighStr,$accelRateStr,$accelScoreStr,$armedStr,$consecutiveStr," +
             "$label,${currentPersona?.id ?: Persona.NONE_ID}," +
             "${currentTrialId ?: "none"},${currentTrialType ?: "none"},${currentTrialPhase ?: "none"}," +
-            "${String.format(Locale.US, "%.4f", accelMedian)}\n"
+            "${String.format(Locale.US, "%.4f", accelMedian)},$speedStr,$speedAccStr\n"
         )
       } catch (e: Exception) {
         Log.e(tag, "CSV 쓰기 실패: ${e.message}")
@@ -1037,7 +1046,10 @@ class BleService : Service() {
   private fun startForegroundServiceNotification(content: String) {
     val notification = createNotification(content)
     if (Build.VERSION.SDK_INT >= 34) {
-      startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+      // location 타입은 위치 권한이 있을 때만 — 권한 없이 선언하면 Android 14+ 에서 SecurityException.
+      var type = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+      if (speedTracker.hasPermission()) type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+      startForeground(1, notification, type)
     } else {
       startForeground(1, notification)
     }
