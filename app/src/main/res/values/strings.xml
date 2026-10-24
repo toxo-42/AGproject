@@ -90,6 +90,12 @@
   <string name="title_data_collect">페달 입력 그래프</string>
   <string name="btn_data_collect">페달 입력 그래프</string>
   <string name="live_values_idle">accel  —      brake  —</string>
+  <string name="judge_status_off">판정 꺼짐 · 메인 화면에서 감시를 시작하세요</string>
+  <string name="judge_status_paused">판정 멈춤 · 브레이크 영점 조절 중</string>
+  <string name="judge_status_persona">판정 중 · 개발자 페르소나 프리셋(%1$s) · 임계 %2$.2f</string>
+  <string name="judge_status_habit">판정 중 · 내 운전 습관 반영 · 임계 %1$.2f</string>
+  <string name="judge_status_default">판정 중 · 기본값 · 임계 %1$.2f</string>
+  <string name="judge_status_default_learning">판정 중 · 기본값(습관 학습 %2$d/%3$d) · 임계 %1$.2f</string>
   <string name="graph_legend">🟢 accel     🔵 brake    🔴 붉은 실선: 엑셀 임계값</string>
 
   <!-- 로깅 데이터 추출(Phase E): 설정 화면에서 세션 선택 후 내보내기 -->

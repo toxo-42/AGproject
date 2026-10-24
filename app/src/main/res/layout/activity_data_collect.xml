@@ -34,6 +34,18 @@
         app:layout_constraintTop_toBottomOf="@id/tvCollectTitle"
         app:layout_constraintStart_toStartOf="parent" />
 
+    <!-- 판정 상태: 켜짐/꺼짐 + 임계값 출처(기본값·습관 학습·페르소나 프리셋) -->
+    <TextView
+        android:id="@+id/tvJudgeStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_md"
+        android:text="@string/judge_status_off"
+        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        app:layout_constraintTop_toBottomOf="@id/togglePersona"
+        app:layout_constraintStart_toStartOf="parent" />
+
     <!-- 현재 압력값 (숫자) -->
     <TextView
         android:id="@+id/tvLiveValues"
@@ -47,7 +59,7 @@
         android:textAppearance="?attr/textAppearanceTitleMedium"
         android:textColor="?attr/colorOnSurface"
         android:fontFamily="monospace"
-        app:layout_constraintTop_toBottomOf="@id/togglePersona"
+        app:layout_constraintTop_toBottomOf="@id/tvJudgeStatus"
         app:layout_constraintStart_toStartOf="parent" />
 
     <!-- 실시간 그래프 (accel/brake + 임계선) — 카드 안에 넣어 화면 배경과 구분 -->

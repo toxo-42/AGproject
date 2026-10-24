@@ -31,6 +31,7 @@ class DataCollectActivity : AppCompatActivity() {
 
   private lateinit var graph: PedalGraphView
   private lateinit var tvLiveValues: TextView
+  private lateinit var tvJudgeStatus: TextView
   private lateinit var btnCalibrate: MaterialButton
   private lateinit var btnResetCalibration: ImageButton
   private lateinit var tvCollectTitle: TextView
@@ -65,7 +66,11 @@ class DataCollectActivity : AppCompatActivity() {
           }
         }
         // 습관 학습 게이트 도달·페르소나 변경 등으로 서비스가 적용한 임계값이 바뀌면 그래프도 따라간다
-        BleService.ACTION_THRESHOLDS_CHANGED -> BleService.appliedThresholdsJson?.let(::applyThresholdsToGraph)
+        BleService.ACTION_THRESHOLDS_CHANGED -> {
+          BleService.appliedThresholdsJson?.let(::applyThresholdsToGraph)
+          updateJudgeStatus()
+        }
+        BleService.ACTION_MONITOR_STATE -> updateJudgeStatus()
         BleService.ACTION_CALIBRATION_DONE -> {
           val json = intent.getStringExtra(BleService.EXTRA_THRESHOLDS_JSON) ?: return
           onCalibrationDone(json)
@@ -80,6 +85,7 @@ class DataCollectActivity : AppCompatActivity() {
 
     graph = findViewById(R.id.graphPedal)
     tvLiveValues = findViewById(R.id.tvLiveValues)
+    tvJudgeStatus = findViewById(R.id.tvJudgeStatus)
     btnCalibrate = findViewById(R.id.btnCalibrate)
     btnResetCalibration = findViewById(R.id.btnResetCalibration)
     tvCollectTitle = findViewById(R.id.tvCollectTitle)
@@ -108,6 +114,7 @@ class DataCollectActivity : AppCompatActivity() {
       addAction(BleService.ACTION_LIVE_SAMPLES)
       addAction(BleService.ACTION_CALIBRATION_DONE)
       addAction(BleService.ACTION_THRESHOLDS_CHANGED)
+      addAction(BleService.ACTION_MONITOR_STATE)
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       registerReceiver(liveReceiver, filter, RECEIVER_NOT_EXPORTED)
@@ -124,6 +131,7 @@ class DataCollectActivity : AppCompatActivity() {
     showExistingCalibration()
     restoreCalibrationProgressIfRunning()
     applyPersonaUi()
+    updateJudgeStatus()
   }
 
   override fun onPause() {
@@ -183,6 +191,7 @@ class DataCollectActivity : AppCompatActivity() {
       graph.setThresholds(PedalGraphView.DEFAULT_ACCEL_HIGH, PedalGraphView.DEFAULT_BRAKE_LOW)
       showExistingCalibration()
       applyPersonaUi()
+      updateJudgeStatus()
     }
   }
 
@@ -265,6 +274,27 @@ class DataCollectActivity : AppCompatActivity() {
       Toast.makeText(this, getString(R.string.msg_calibration_done, brakeLow), Toast.LENGTH_LONG).show()
     } catch (e: Exception) {
       Log.e(tag, "캘리브레이션 결과 파싱 실패: ${e.message}", e)
+    }
+  }
+
+  // 지금 판정이 켜져 있는지 + 임계값이 어디서 왔는지(2026-09-26 실주행: 페르소나 프리셋으로 이미 판정 중인데
+  // "영점 조절 안 했으니 경고 없음"으로 오해했다). 서비스가 실제 적용 중인 값(appliedThresholdsJson)만 본다 —
+  // 출처 우선순위는 BleService.readCalibratedThresholds 와 같다(페르소나 > 습관 학습 > 기본값).
+  // 페르소나 문구는 개발자가 골라 둔 경우에만 나온다(메인 화면 calibration_done 과 같은 기준).
+  private fun updateJudgeStatus() {
+    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    val accelHigh = BleService.appliedThresholdsJson?.let {
+      try { JSONObject(it).getDouble("accel_high") } catch (e: Exception) { null }
+    }
+    val persona = CalibrationPrefs.currentPersona(prefs)
+    val habit = CalibrationPrefs.habitProgress(prefs)
+    tvJudgeStatus.text = when {
+      !BleService.monitorState.isActive -> getString(R.string.judge_status_off)
+      accelHigh == null -> getString(R.string.judge_status_paused)
+      persona != null -> getString(R.string.judge_status_persona, getString(persona.labelRes), accelHigh)
+      habit?.ready == true -> getString(R.string.judge_status_habit, accelHigh)
+      habit != null -> getString(R.string.judge_status_default_learning, accelHigh, habit.events, habit.gate)
+      else -> getString(R.string.judge_status_default, accelHigh)
     }
   }
 
