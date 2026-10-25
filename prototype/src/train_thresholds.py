@@ -9,7 +9,7 @@
      정답: 오조작 재현 회차의 순간(회차별 최대 변화율) = 1 / 정상 주행·천천히 깊게 밟기 = 0
      → p=0.5 가 되는 변화율이 학습된 임계값
 
-  2. accel_high (지금 "개인 p90 + 0.20" 고정 공식)
+  2. accel_high (지금 앱의 습관 학습 공식 "개인 p90 + HABIT_OFFSET, 상한 HABIT_CAP" — peob.habit.personal_accel_high)
      입력: 윈도우 엑셀 레벨(accel_median, 옛 CSV 는 마지막 샘플로 근사) + 그 사람의 평소 p90
      정답: 오조작 유지 구간 = 1 / 정상 주행 중 페달을 밟고 있는 구간 = 0
      → 결정경계를 풀면 accel_high = slope × p90 + intercept — 개인별 임계값 공식 자체가 학습된다
@@ -22,7 +22,9 @@
 CSV 에는 원시 200Hz 샘플이 없어서 윈도우 판정을 행 값(accel_median/accel_rate)으로 복원하는 근사다.
 
 실행:  uv run python src/train_thresholds.py [csv_또는_디렉터리 ...] [--out 경로]
-       인자 없으면 저장소 루트 "수집 데이터" 를 읽고 out/learned_thresholds.json 에 쓴다.
+       인자 없으면 저장소 루트 "수집 데이터" 를 읽는다. 합성 데이터로 돌리려면 그 디렉터리를 인자로 준다.
+       결과는 기본으로 backend/src/peob/learned_thresholds.json — 앱이 번들해 판정에 쓰는 바로 그 파일이다
+       (파이프라인의 "배포"). adopt: false 면 앱은 지금 규칙을 유지한다. 실험만 할 땐 --out 으로 다른 곳에 쓴다.
 """
 
 from __future__ import annotations
@@ -42,7 +44,9 @@ from dataset import (
     default_data_dir,
     load_sessions,
 )
-from peob.calibration import ACCEL_HIGH_OFFSET, DEFAULT_ACCEL_RATE_HIGH, DEFAULT_BRAKE_LOW, DEFAULT_HIGH_RATIO
+import peob.learned
+from peob.calibration import DEFAULT_ACCEL_RATE_HIGH, DEFAULT_BRAKE_LOW, DEFAULT_HIGH_RATIO
+from peob.habit import HABIT_CAP, HABIT_OFFSET, personal_accel_high
 from peob.features import ACCEL_ACTIVE_THRESHOLD, extract_features
 from peob.judge import MisopDetector
 from train_logreg import standardize, train_logreg
@@ -79,17 +83,19 @@ class LearnedThresholds:
     level_mode: str = "slope"
 
     def accel_high(self, p90: float) -> float:
-        return min(max(self.level_slope * p90 + self.level_intercept, 0.0), 1.0)
+        # 앱(habit)과 같은 함수 — 상한 HABIT_CAP 까지 같아야 검증이 앱 동작을 재현한다
+        return personal_accel_high(p90, self.level_slope, self.level_intercept)
 
 
 @dataclass(frozen=True)
 class CurrentRule:
-    """비교 기준 — 지금 앱이 쓰는 사람이 정한 값(p90 + 0.20, 변화율 0.30)"""
+    """비교 기준 — 학습값이 없을 때 앱이 쓰는 규칙(습관 학습 p90 + HABIT_OFFSET·상한 HABIT_CAP, 변화율 0.30).
+    ⚠️ 2026-10-25 전엔 옛 캘리브레이션 공식(p90 + 0.20, 상한 1.0)과 비교하고 있었다 — 앱은 10-01 부터 습관 학습 공식을 쓴다."""
 
     accel_rate_high: float = DEFAULT_ACCEL_RATE_HIGH
 
     def accel_high(self, p90: float) -> float:
-        return min(p90 + ACCEL_HIGH_OFFSET, 1.0)
+        return personal_accel_high(p90)
 
 
 # ── 데이터 준비 ───────────────────────────────────────────────────────────
@@ -328,7 +334,7 @@ def cross_validate(sessions: list[Session], baselines: dict[str, float]) -> list
 
 def main() -> None:
     args = sys.argv[1:]
-    out_path = Path(__file__).resolve().parents[1] / "out" / "learned_thresholds.json"
+    out_path = Path(peob.learned.__file__).with_name(peob.learned.LEARNED_FILE)
     if "--out" in args:
         i = args.index("--out")
         out_path = Path(args[i + 1])
@@ -337,6 +343,10 @@ def main() -> None:
     if not sessions:
         print("CSV를 찾지 못했습니다.")
         return
+    synthetic = sum(1 for s in sessions if s.synthetic)
+    print(f"== 입력: 세션 {len(sessions)}개 (실데이터 {len(sessions) - synthetic} / 합성 {synthetic}) ==")
+    if synthetic:
+        print("  ⚠️ 합성 데이터가 섞여 있습니다 — 아래 검증 수치는 생성기 가정의 영향을 받으므로 성능 근거로 쓰지 마세요.")
 
     baselines = personal_baselines(sessions)
     print("== 개인(페르소나)별 평소 엑셀 p90 ==")
@@ -366,7 +376,7 @@ def main() -> None:
     X_level, y_level = level_dataset(sessions, baselines)
     X_rate, y_rate = rate_dataset(sessions)
     print("\n== 전체 데이터로 학습한 최종 파라미터 ==")
-    print(f"  accel_high = {learned.level_slope:.3f} × p90 + {learned.level_intercept:.3f}   (지금: 1.000 × p90 + {ACCEL_HIGH_OFFSET:.3f})")
+    print(f"  accel_high = {learned.level_slope:.3f} × p90 + {learned.level_intercept:.3f}   (지금: 1.000 × p90 + {HABIT_OFFSET:.3f}, 상한 {HABIT_CAP:.2f})")
     if learned.level_mode == "offset_only":
         print(f"  ⚠️ 오조작 예시가 개인 {MIN_PERSONAS_FOR_SLOPE}명 이상에서 나오지 않아 기울기는 1로 고정하고 오프셋만 학습했습니다.")
         print("     페르소나별로 재현 실험(패닉 급밟기)을 하면 개인별 기울기까지 학습됩니다.")
@@ -385,6 +395,8 @@ def main() -> None:
         "fixed": {"brake_low": DEFAULT_BRAKE_LOW, "high_ratio": DEFAULT_HIGH_RATIO},
         "data": {
             "sessions": len(sessions),
+            # 합성(source=synthetic) 세션 수 — 앱 화면에 표시되고, 실데이터로 교체됐는지 이 값으로 확인한다
+            "synthetic_sessions": synthetic,
             "rows": sum(len(s.rows) for s in sessions),
             "level_examples": {"misop": sum(y_level), "normal": len(y_level) - sum(y_level)},
             "rate_examples": {"misop": sum(y_rate), "normal": len(y_rate) - sum(y_rate)},

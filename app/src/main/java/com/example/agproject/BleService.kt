@@ -200,6 +200,13 @@ class BleService : Service() {
       private set
     const val ACTION_THRESHOLDS_CHANGED = "ACTION_THRESHOLDS_CHANGED"
 
+    /**
+     * 앱에 번들된 PC 학습 결과 요약(peob.learned.learned_info_json) — 채택된 학습값이 없으면 null.
+     * APK 에 고정된 값이라 서비스 시작 시 한 번 읽는다. 화면의 "AI 학습" 표시용.
+     */
+    @Volatile var learnedInfoJson: String? = null
+      private set
+
     // Nordic UART Service (NUS) 표준 UUID
     private val NUS_SERVICE = UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
     private val NUS_RX = UUID.fromString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E") // 폰 -> 기기 (Write)
@@ -292,6 +299,13 @@ class BleService : Service() {
     if (!Python.isStarted()) {
       Python.start(AndroidPlatform(this))
     }
+    learnedInfoJson = try {
+      Python.getInstance().getModule("peob.learned").callAttr("learned_info_json").toString().ifEmpty { null }
+    } catch (e: Exception) {
+      Log.e(tag, "학습 결과 읽기 실패: ${e.message}", e)
+      null
+    }
+    Log.i(tag, "번들된 학습 결과: ${learnedInfoJson ?: "없음(지금 규칙 사용)"}")
   }
 
   @SuppressLint("ForegroundServiceType")
@@ -634,6 +648,8 @@ class BleService : Service() {
   private fun agPrefs() = getSharedPreferences("AgPrefs", MODE_PRIVATE)
 
   // 판정에 쓸 임계값 JSON — 개발자 페르소나 프리셋 > 사용자 캘리브레이션 > 기본값(calibration.DEFAULT_ACCEL_HIGH).
+  // 사용자 경로엔 PC 학습 결과(채택된 경우만)가 반영된다: 변화율은 learned.apply_learned_json, accel_high 공식은 습관 학습 안에서.
+  // 페르소나 프리셋엔 반영하지 않는다 — 수집 조건이 학습 결과에 따라 바뀌면 데이터끼리 비교가 안 된다.
   // 페르소나가 아니면 accel_high 는 습관 학습값이 준비된 경우 그걸로 덮는다(brake_low 등은 캘리브레이션 값 유지 —
   // 15초 캘리브레이션은 습관보다 브레이크 예압 0점 보정에 더 의미가 있다, 2026-10-01 사용자 결정).
   // 캘리브레이션 전에도 판정을 켜 두는 이유: 첫 주행도 보호하고, CSV 에 변화율(accel_rate)이 빠짐없이 남게.
@@ -643,8 +659,9 @@ class BleService : Service() {
     return try {
       val calibration = Python.getInstance().getModule("peob.calibration")
       if (persona != null) return calibration.callAttr("preset_thresholds_json", persona.accelHigh).toString()
-      val base = CalibrationPrefs.userCalibration(agPrefs())
+      val saved = CalibrationPrefs.userCalibration(agPrefs())
         ?: calibration.callAttr("default_thresholds_json").toString()
+      val base = Python.getInstance().getModule("peob.learned").callAttr("apply_learned_json", saved).toString()
       habitLearner?.callAttr("apply_json", base)?.toString() ?: base
     } catch (e: Exception) {
       Log.e(tag, "프리셋/기본 임계값 생성 실패: ${e.message}", e)

@@ -12,6 +12,8 @@
   - 이벤트 GATE_EVENTS 회 전엔 None(기본값/수동 캘리브레이션 유지).
   - 개인값 = min(p90 + HABIT_OFFSET, HABIT_CAP). +0.20 이면 평소 세게 밟는 사람(dad p90 0.77)의
     임계값이 0.97 이 돼 급밟기(self 최대 0.89)가 도달 못 할 수 있어 +0.10·상한 0.90 으로 정함.
+    PC 학습 결과가 채택돼 있으면(learned.py) p90 + HABIT_OFFSET 대신 학습 공식 slope × p90 + intercept 를 쓴다
+    (상한은 그대로). 공식은 personal_accel_high 하나 — PC 검증(train_thresholds)도 이걸로 앱과 같은 값을 재현한다.
   - 기준값(base)에서 개인값으로 가중치 n/(n+BLEND_K) 만큼 이동 — 데이터가 늘수록 개인값 쪽으로.
   - 직전 적용값과 DEAD_BAND 미만 차이면 바꾸지 않는다(의미 없는 흔들림 방지).
   - 언제 적용할지(주행 시작 + 첫 게이트 도달 순간)는 호출하는 쪽(BleService)이 정한다.
@@ -23,6 +25,7 @@ import json
 from collections import deque
 
 from .features import ACCEL_ACTIVE_THRESHOLD
+from .learned import LearnedParams, load_learned
 
 HIST_BINS = 100          # 0.01 간격 — 원본을 쌓지 않고 분포만 유지(10분에 수십만 샘플이라)
 GATE_EVENTS = 100
@@ -36,10 +39,19 @@ PRE_FIRE_WINDOWS = 2
 POST_FIRE_WINDOWS = 8
 
 
+def personal_accel_high(p90: float, slope: float = 1.0, intercept: float = HABIT_OFFSET) -> float:
+    """평소 p90 → 개인 accel_high. 기본 인자가 지금 규칙(p90 + HABIT_OFFSET), 학습값이 있으면 그 기울기·절편."""
+    return min(max(slope * p90 + intercept, 0.0), HABIT_CAP)
+
+
 class HabitLearner:
     """평소 엑셀 깊이 누적기. 인스턴스 하나 = 한 사용자의 누적 상태(주행을 넘어 JSON 으로 이어짐)."""
 
-    def __init__(self, hist: list[int] | None = None, events: int = 0, applied: float | None = None) -> None:
+    def __init__(
+        self, hist: list[int] | None = None, events: int = 0, applied: float | None = None,
+        learned: LearnedParams | None = None,
+    ) -> None:
+        self.learned = learned   # PC 학습 결과(채택된 경우만) — 개인값 공식을 바꾼다. 저장하지 않음(앱 번들에서 매번 읽음)
         self.hist = list(hist) if hist is not None else [0] * (HIST_BINS + 1)
         self.events = events
         self.applied = applied   # 마지막으로 적용한 accel_high — 주행을 넘어 DEAD_BAND 비교에 쓴다
@@ -91,7 +103,8 @@ class HabitLearner:
         p90 = self.p90()
         if not self.ready or p90 is None:
             return None
-        personal = min(p90 + HABIT_OFFSET, HABIT_CAP)
+        learned = self.learned
+        personal = personal_accel_high(p90) if learned is None else personal_accel_high(p90, learned.slope, learned.intercept)
         weight = self.events / (self.events + BLEND_K)
         value = round(base + weight * (personal - base), 4)
         if self.applied is not None and abs(value - self.applied) < DEAD_BAND:
@@ -116,8 +129,9 @@ class HabitLearner:
 
 
 def load_learner(state_json: str) -> HabitLearner:
-    """Chaquopy 경계용: 저장된 상태(JSON 문자열, 없으면 빈 문자열)로 학습기를 만든다."""
+    """Chaquopy 경계용: 저장된 상태(JSON 문자열, 없으면 빈 문자열)와 번들된 학습 결과로 학습기를 만든다."""
+    learned = load_learned()
     if not state_json:
-        return HabitLearner()
+        return HabitLearner(learned=learned)
     state = json.loads(state_json)
-    return HabitLearner(state["hist"], state["events"], state.get("applied"))
+    return HabitLearner(state["hist"], state["events"], state.get("applied"), learned=learned)

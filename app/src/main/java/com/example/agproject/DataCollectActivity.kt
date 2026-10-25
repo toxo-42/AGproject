@@ -288,13 +288,31 @@ class DataCollectActivity : AppCompatActivity() {
     }
     val persona = CalibrationPrefs.currentPersona(prefs)
     val habit = CalibrationPrefs.habitProgress(prefs)
-    tvJudgeStatus.text = when {
+    val status = when {
       !BleService.monitorState.isActive -> getString(R.string.judge_status_off)
       accelHigh == null -> getString(R.string.judge_status_paused)
       persona != null -> getString(R.string.judge_status_persona, getString(persona.labelRes), accelHigh)
       habit?.ready == true -> getString(R.string.judge_status_habit, accelHigh)
       habit != null -> getString(R.string.judge_status_default_learning, accelHigh, habit.events, habit.gate)
       else -> getString(R.string.judge_status_default, accelHigh)
+    }
+    // PC 학습 결과는 사용자 판정 경로에만 반영되므로(BleService.readCalibratedThresholds) 그때만 붙인다
+    val learned = if (accelHigh != null && persona == null) learnedSummary() else null
+    tvJudgeStatus.text = if (learned != null) "$status\n$learned" else status
+  }
+
+  // "AI 학습 · 세션 20개 (10/01)". 합성 데이터 비율은 개발 맥락이라 dev mode 에서만 보인다.
+  private fun learnedSummary(): String? {
+    val info = BleService.learnedInfoJson ?: return null
+    return try {
+      val json = JSONObject(info)
+      val sessions = json.getInt("sessions")
+      val date = json.getString("trained_at").take(10).drop(5).replace('-', '/')
+      val synthetic = json.optInt("synthetic_sessions", 0)
+      if (devMode && synthetic > 0) getString(R.string.judge_learned_synthetic, sessions, date, synthetic)
+      else getString(R.string.judge_learned, sessions, date)
+    } catch (e: Exception) {
+      null
     }
   }
 

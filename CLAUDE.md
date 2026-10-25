@@ -16,7 +16,8 @@
 - 오조작 판단은 **전부 폰 로컬**. 펌웨어는 raw 센서값만 전달.
 - Python backend 원본은 `backend/`(`peob` 패키지) 하나뿐. 앱(Chaquopy srcDir)과 PC 도구(`prototype/`, uv 경로 의존성)가
   **같은 코드를 공유**한다 — 복사본을 만들지 말 것. 테스트: `cd backend && uv run pytest`.
-- 임계값 학습(PC): `cd prototype && uv run python src/train_thresholds.py` → `prototype/out/learned_thresholds.json`.
+- 임계값 학습(PC): `cd prototype && uv run python src/train_thresholds.py [데이터 디렉터리]` → `backend/src/peob/learned_thresholds.json`
+  (앱이 번들해 쓰는 배포물 — git 추적. `adopt: true`일 때만 앱 판정에 반영, 실험은 `--out`으로 다른 경로에).
   테스트: `cd prototype && uv run pytest`.
 
 ## 관련 문서

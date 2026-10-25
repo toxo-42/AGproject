@@ -130,3 +130,23 @@ def test_adopt_only_when_better_or_equal_on_every_metric():
     assert should_adopt(better, current)
     assert not should_adopt(noisier, current)
     assert not should_adopt(Evaluation(), Evaluation())
+
+
+# ── 파이프라인 연결: 합성 데이터 표시, 비교 기준 = 앱 규칙 ──
+
+
+def test_synthetic_session_is_marked_by_source_column(tmp_path):
+    from dataset import load_session
+
+    header = "accel,brake,label,source\n"
+    (tmp_path / "syn.csv").write_text(header + "0.5,0.0,0,synthetic\n", encoding="utf-8")
+    (tmp_path / "real.csv").write_text("accel,brake,label\n0.5,0.0,0\n", encoding="utf-8")
+    assert load_session(tmp_path / "syn.csv").synthetic
+    assert not load_session(tmp_path / "real.csv").synthetic
+
+
+def test_current_rule_matches_app_habit_formula():
+    from peob.habit import HABIT_CAP, HABIT_OFFSET
+
+    assert CurrentRule().accel_high(0.5) == 0.5 + HABIT_OFFSET
+    assert CurrentRule().accel_high(0.95) == HABIT_CAP

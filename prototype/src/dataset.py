@@ -23,6 +23,9 @@ TRIAL_HARD_NORMAL = "hard_normal"
 TRIAL_SLOW_DEEP = "slow_deep"
 TRIAL_FREE_ACT = "free_act"
 
+# 합성 데이터 생성기가 CSV source 컬럼에 찍는 값(실데이터 CSV 엔 source 컬럼 자체가 없다)
+SOURCE_SYNTHETIC = "synthetic"
+
 # CSV 1행 = 판정 윈도우 0.25초
 ROWS_PER_SEC = 4.0
 
@@ -50,6 +53,7 @@ class Session:
     name: str
     rows: list[Row]
     has_label_column: bool    # False 면 옛 정상 주행 세션(라벨 개념 없음 → 전부 정상으로 취급)
+    synthetic: bool = False   # 합성 데이터 생성기가 만든 세션(source 컬럼 = "synthetic"). 앱 CSV 엔 이 컬럼이 없다
 
     @property
     def has_rate(self) -> bool:
@@ -109,7 +113,8 @@ def load_session(path: Path) -> Session | None:
     rows = parse_rows(raw_rows)
     if not rows:
         return None
-    return Session(name=path.name, rows=rows, has_label_column="label" in fields)
+    synthetic = any(raw.get("source") == SOURCE_SYNTHETIC for raw in raw_rows[:1])
+    return Session(name=path.name, rows=rows, has_label_column="label" in fields, synthetic=synthetic)
 
 
 def find_csv_files(paths: list[str]) -> list[Path]:

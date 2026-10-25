@@ -95,6 +95,8 @@
   <string name="judge_status_persona">판정 중 · 개발자 페르소나 프리셋(%1$s) · 임계 %2$.2f</string>
   <string name="judge_status_habit">판정 중 · 내 운전 습관 반영 · 임계 %1$.2f</string>
   <string name="judge_status_default">판정 중 · 기본값 · 임계 %1$.2f</string>
+  <string name="judge_learned">AI 학습 임계값 적용 · 세션 %1$d개 (%2$s)</string>
+  <string name="judge_learned_synthetic">AI 학습 임계값 적용 · 세션 %1$d개 (%2$s) · 합성 %3$d개 포함</string>
   <string name="judge_status_default_learning">판정 중 · 기본값(습관 학습 %2$d/%3$d) · 임계 %1$.2f</string>
   <string name="graph_legend">🟢 accel     🔵 brake    🔴 붉은 실선: 엑셀 임계값</string>
 
