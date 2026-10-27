@@ -31,6 +31,10 @@ LABELS = ("beginner", "normal", "aggressive")
 # (케이스 예압으로 뗀 상태가 ~0.2 인 세션 대응, calibration.BRAKE_LOW_MARGIN 과 같은 생각)
 BRAKE_ON_MARGIN = 0.10
 MIN_CHUNKS_PER_FEATURE = 1   # 성향마다 이만큼의 구간에 값이 있어야 그 지표를 중심에 넣는다
+# 기준점에서 빼는 지표(앱 계산은 그대로 함). GPS 급가감속은 2분 구간에 0~1회뿐이라 중앙값이 0 아니면 30/h 로 튀고
+# (2026-10-27 실측: 평범 30, 난폭 0 — 순서가 뒤집힘), 앱은 수십 분 누적으로 재서 척도도 안 맞는다.
+# 성향마다 수십 분 이상 쌓이면 긴 구간으로 다시 넣는다.
+EXCLUDED_FEATURES = frozenset({"harsh_accel_per_h", "harsh_decel_per_h"})
 
 
 def estimate_brake_on(rows: list[Row]) -> float:
@@ -62,7 +66,7 @@ def labeled_chunks(paths: list[str], chunk_rows: int) -> dict[str, list[dict[str
 def fit(chunks: dict[str, list[dict[str, float | None]]]) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
     """(성향별 중심, 지표별 척도). 모든 성향에 충분한 값이 있는 지표만 쓴다(한쪽만 있으면 비교가 안 된다)."""
     labels = [label for label, cs in chunks.items() if cs]
-    features = [f for f in (next(iter(chunks[labels[0]])) if labels else {})
+    features = [f for f in (next(iter(chunks[labels[0]])) if labels else {}) if f not in EXCLUDED_FEATURES
                 if all(sum(c[f] is not None for c in chunks[label]) >= MIN_CHUNKS_PER_FEATURE for label in labels)]
     centroids = {label: {f: statistics.median(c[f] for c in chunks[label] if c[f] is not None) for f in features}
                  for label in labels}
@@ -121,7 +125,8 @@ def main() -> None:
     print("\n== 성향별 중심 (척도) ==")
     for f, s in scale.items():
         print(f"  {f:<18}" + "".join(f"{label[:6]:>8} {centroids[label][f]:.3f}" for label in centroids) + f"   (±{s:.3f})")
-    unused = [f for f in next(iter(next(v for v in chunks.values() if v))) if f not in scale]
+    print(f"  기준점에서 일부러 뺀 지표: {', '.join(sorted(EXCLUDED_FEATURES))} (EXCLUDED_FEATURES 주석 참고)")
+    unused = [f for f in next(iter(next(v for v in chunks.values() if v))) if f not in scale and f not in EXCLUDED_FEATURES]
     if unused:
         print(f"  ⚠️ 데이터가 없어 빠진 지표: {', '.join(unused)} — 브레이크·GPS 가 기록된 라벨 데이터가 생기면 자동으로 들어간다.")
 
