@@ -50,6 +50,8 @@ class BleService : Service() {
   // Python=판정 backend 방향). 임계값이 바뀔 때마다 applyCalibratedThresholds() 가 새로 만든다.
   // null = 패턴 파악(캘리브레이션) 진행 중 → 판정 안 함. 캘리브레이션 전에는 기본 임계값으로 만든다.
   @Volatile private var detector: PyObject? = null
+  // 판정 호출(step_json) 연속 실패 수 — JudgeStatus.FAILURE_LIMIT 에 닿으면 판정 오류로 알린다. 성공하거나 detector 를 새로 만들면 0.
+  @Volatile private var consecutiveJudgeFailures = 0
 
   // judgeWindow() 한 번의 결과. writeRawCsv() 가 같은 윈도우 행을 쓸 때 인자로 받는다.
   // fired 는 onPedalMisoperation() 이 실제로 호출된 그 윈도우에서만 true(2026-07-17 사용자 결정
@@ -199,6 +201,13 @@ class BleService : Service() {
     @Volatile var monitorState: MonitorState = MonitorState.STOPPED
       private set
     const val ACTION_MONITOR_STATE = "ACTION_MONITOR_STATE"
+
+    /**
+     * 판정이 실제로 돌고 있는지(JudgeStatus 참고). monitorState 와 같은 규칙: 쓰기는 refreshJudgeStatus 만,
+     * 바뀌면 ACTION_MONITOR_STATE 방송. 서비스가 꺼져 있으면 의미 없다 — 화면은 monitorState.isActive 일 때만 본다.
+     */
+    @Volatile var judgeStatus: JudgeStatus = JudgeStatus.ACTIVE
+      private set
 
     /**
      * 지금 판정에 실제로 적용 중인 임계값 JSON — 화면(수집 그래프 임계선)이 그릴 단일 출처.
@@ -448,6 +457,8 @@ class BleService : Service() {
     startForegroundServiceNotification("타겟 감시 중: $targetAddress")
     speedTracker.start()   // 포그라운드 진입 후에 시작해야 백그라운드에서도 위치를 받는다
     setMonitorState(MonitorState.CONNECTING)
+    // 위 임계값 적용 때 판정 오류가 났어도 그땐 감시 전이라 알리지 않았다 — 이제 알린다
+    if (judgeStatus == JudgeStatus.FAILED) announceJudgeStatus(wasFailed = false)
     startTargetScan()
 
     return START_NOT_STICKY
@@ -494,6 +505,7 @@ class BleService : Service() {
     liveStyleReportJson = null
     sendBroadcastToActivity(ACTION_LEARNING_PROGRESS)
     appliedThresholdsJson = null
+    judgeStatus = JudgeStatus.ACTIVE   // 다음 감시가 이전 오류 상태를 물려받지 않게(방송은 아래 STOPPED 가 한다)
     pedalEdgeOverlay.detach()   // WRONG_DEVICE 로 끝나면 setMonitorState 를 거치지 않으므로 직접 뗀다
     // UUID 불일치로 스스로 종료한 경우엔 그 사실을 화면에 남겨 두려고 WRONG_DEVICE 유지
     if (monitorState != MonitorState.WRONG_DEVICE) setMonitorState(MonitorState.STOPPED)
@@ -551,7 +563,8 @@ class BleService : Service() {
     override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
       if (newState == BluetoothProfile.STATE_CONNECTED) {
         Log.i(tag, "[성공] 기기 연결됨! 서비스를 탐색합니다...")
-        updateNotification("기기 연결됨 - 오조작 감지 중...")
+        // 판정 오류 중이면 그 문구를 유지한다(연결됐다고 보호받는 건 아니다)
+        if (judgeStatus != JudgeStatus.FAILED) updateNotification("기기 연결됨 - 오조작 감지 중...")
         gatt?.discoverServices()
       } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
         // 이미 정리한 GATT(서비스 종료 등)에서 뒤늦게 온 콜백이면 무시 — 종료된 서비스가 다시 스캔하지 않게
@@ -830,8 +843,35 @@ class BleService : Service() {
       Log.e(tag, "판정 상태기계 생성 실패: ${e.message}", e)
       null
     }
+    consecutiveJudgeFailures = 0
     appliedThresholdsJson = json
     sendBroadcastToActivity(ACTION_THRESHOLDS_CHANGED)
+    refreshJudgeStatus()
+  }
+
+  // 판정 상태를 다시 계산해, 바뀌었으면 공개·방송한다. 감시 중일 때만 알림을 띄운다
+  // (감시 시작 전에 이미 오류였던 경우는 onStartCommand 가 감시 상태로 들어간 뒤 직접 알린다).
+  private fun refreshJudgeStatus() {
+    val status = JudgeStatus.of(isCalibrating, detector != null, consecutiveJudgeFailures)
+    if (status == judgeStatus) return
+    val wasFailed = judgeStatus == JudgeStatus.FAILED
+    judgeStatus = status
+    Log.i(tag, "판정 상태: $status")
+    if (monitorState.isActive) announceJudgeStatus(wasFailed)
+    sendBroadcastToActivity(ACTION_MONITOR_STATE)
+  }
+
+  // 판정 오류면 상단 알림 문구를 바꾸고 헤드업으로 한 번 알린다. 오류에서 풀렸으면 원래 문구로 되돌린다.
+  // 음성은 쓰지 않는다 — 가진 음성 파일은 "장치 오류"용이라 상황과 다르다.
+  private fun announceJudgeStatus(wasFailed: Boolean) {
+    if (judgeStatus == JudgeStatus.FAILED) {
+      updateNotification("판정 오류 — 오조작 경고가 동작하지 않습니다")
+      showHeadsUpNotification("판정 오류", "지금은 페달 오조작 경고가 뜨지 않습니다")
+    } else if (wasFailed) {
+      updateNotification(
+        if (monitorState == MonitorState.MONITORING) "기기 연결됨 - 오조작 감지 중..." else "타겟 감시 중: $targetAddress"
+      )
+    }
   }
 
   // "패턴 파악" 시작 — 이후 CALIBRATION_DURATION_MS 동안 들어오는 원시 샘플을 모은다.
@@ -1073,6 +1113,10 @@ class BleService : Service() {
         consecutive = result.getInt("consecutive"),
         fired = result.getBoolean("fired"),
       )
+      if (consecutiveJudgeFailures > 0) {
+        consecutiveJudgeFailures = 0
+        refreshJudgeStatus()
+      }
 
       // 판정은 4Hz 로 나온다. 상태가 바뀌는 순간(정상<->오조작)은 항상 남기고,
       // 변화가 없으면 살아있다는 표시로 주기적 하트비트만 남긴다.
@@ -1101,7 +1145,10 @@ class BleService : Service() {
       }
       return judged
     } catch (e: Exception) {
-      Log.e(tag, "judge 호출 실패: ${e.message}", e)
+      // 계속 실패하면 4Hz 로 쌓여 logcat 이 밀려 나간다 — 연속 실패의 첫 번만 남긴다(오류 진입은 "판정 상태" 로그로 보인다)
+      if (consecutiveJudgeFailures == 0) Log.e(tag, "judge 호출 실패: ${e.message}", e)
+      consecutiveJudgeFailures++
+      refreshJudgeStatus()
       return null
     }
   }

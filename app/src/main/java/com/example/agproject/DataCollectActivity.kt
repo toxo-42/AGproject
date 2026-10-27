@@ -288,16 +288,19 @@ class DataCollectActivity : AppCompatActivity() {
     }
     val persona = CalibrationPrefs.currentPersona(prefs)
     val habit = CalibrationPrefs.habitProgress(prefs)
+    val judgeStatus = BleService.judgeStatus
     val status = when {
       !BleService.monitorState.isActive -> getString(R.string.judge_status_off)
-      accelHigh == null -> getString(R.string.judge_status_paused)
+      // 임계값이 있어도 상태기계를 못 만들었거나 판정 호출이 계속 실패하면 판정 오류(JudgeStatus 참고)
+      judgeStatus == JudgeStatus.FAILED -> getString(R.string.judge_status_failed)
+      judgeStatus == JudgeStatus.CALIBRATING || accelHigh == null -> getString(R.string.judge_status_paused)
       persona != null -> getString(R.string.judge_status_persona, getString(persona.labelRes), accelHigh)
       habit?.ready == true -> getString(R.string.judge_status_habit, accelHigh)
       habit != null -> getString(R.string.judge_status_default_learning, accelHigh, habit.events, habit.gate)
       else -> getString(R.string.judge_status_default, accelHigh)
     }
     // PC 학습 결과는 사용자 판정 경로에만 반영되므로(BleService.readCalibratedThresholds) 그때만 붙인다
-    val learned = if (accelHigh != null && persona == null) learnedSummary() else null
+    val learned = if (judgeStatus == JudgeStatus.ACTIVE && accelHigh != null && persona == null) learnedSummary() else null
     tvJudgeStatus.text = if (learned != null) "$status\n$learned" else status
   }
 

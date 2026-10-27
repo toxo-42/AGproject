@@ -164,6 +164,8 @@ class MainActivity : AppCompatActivity() {
     // 1. 상태 칩 (점 색 + 글자)
     val (statusText, dotAttr) = when {
       !hasDevice -> R.string.monitor_no_device to MaterialR.attr.colorOutline
+      // 연결 상태와 무관하게 판정이 꺼졌으면 보호받지 못하는 상태 — 가장 먼저 드러낸다
+      state.isActive && BleService.judgeStatus == JudgeStatus.FAILED -> R.string.monitor_judge_failed to MaterialR.attr.colorError
       else -> when (state) {
         MonitorState.STOPPED -> R.string.monitor_stopped to MaterialR.attr.colorOutline
         MonitorState.CONNECTING -> R.string.monitor_connecting to MaterialR.attr.colorTertiary

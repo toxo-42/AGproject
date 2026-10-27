@@ -56,6 +56,7 @@
   <string name="monitor_monitoring">감시 중</string>
   <string name="monitor_reconnecting">재연결 중…</string>
   <string name="monitor_wrong_device">잘못된 기기</string>
+  <string name="monitor_judge_failed">판정 오류 · 경고 꺼짐</string>
   <string name="msg_wrong_device">UUID 불일치 — 기기를 다시 검색하세요</string>
   <string name="calibration_done">개발자 페르소나 프리셋 적용 중</string>
   <string name="calibration_needed">기본값으로 감지 중 · 운전하면 습관을 학습해요  ›</string>
@@ -92,6 +93,7 @@
   <string name="live_values_idle">accel  —      brake  —</string>
   <string name="judge_status_off">판정 꺼짐 · 메인 화면에서 감시를 시작하세요</string>
   <string name="judge_status_paused">판정 멈춤 · 브레이크 영점 조절 중</string>
+  <string name="judge_status_failed">판정 오류 · 지금은 오조작 경고가 뜨지 않습니다</string>
   <string name="judge_status_persona">판정 중 · 개발자 페르소나 프리셋(%1$s) · 임계 %2$.2f</string>
   <string name="judge_status_habit">판정 중 · 내 운전 습관 반영 · 임계 %1$.2f</string>
   <string name="judge_status_default">판정 중 · 기본값 · 임계 %1$.2f</string>
