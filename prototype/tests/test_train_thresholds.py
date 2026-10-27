@@ -150,3 +150,13 @@ def test_current_rule_matches_app_habit_formula():
 
     assert CurrentRule().accel_high(0.5) == 0.5 + HABIT_OFFSET
     assert CurrentRule().accel_high(0.95) == HABIT_CAP
+
+
+def test_demo_rows_are_excluded_from_training():
+    # 데모(시연) 모드로 기록된 행은 학습 데이터에 섞이지 않아야 한다
+    rows = parse_rows([
+        {"accel": "0.5", "brake": "0.0", "purpose": "train"},
+        {"accel": "0.9", "brake": "0.0", "purpose": "demo"},
+        {"accel": "0.4", "brake": "0.0"},   # purpose 컬럼 없는 옛 CSV
+    ])
+    assert [r.accel for r in rows] == [0.5, 0.4]

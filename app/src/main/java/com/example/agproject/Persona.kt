@@ -98,6 +98,10 @@ object CalibrationPrefs {
     prefs.edit().putString(KEY_STYLE_STATE, stateJson).apply()
   }
 
+  fun clearStyleState(prefs: SharedPreferences) {
+    prefs.edit().remove(KEY_STYLE_STATE).apply()
+  }
+
   fun isStyleDemo(prefs: SharedPreferences): Boolean = prefs.getBoolean(KEY_STYLE_DEMO, false)
 
   fun setStyleDemo(prefs: SharedPreferences, enabled: Boolean) {

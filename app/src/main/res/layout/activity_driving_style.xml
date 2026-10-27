@@ -84,5 +84,14 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/space_lg"/>
+
+    <!-- 운전 패턴(성향 누적) 초기화 — 확인 후 처음부터 다시 모은다 -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnResetStyle"
+        style="@style/Widget.PeOb.Button.Outlined.Danger"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/button_height"
+        android:layout_marginTop="@dimen/space_xl"
+        android:text="@string/btn_reset_style"/>
   </LinearLayout>
 </ScrollView>

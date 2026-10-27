@@ -23,6 +23,9 @@ TRIAL_HARD_NORMAL = "hard_normal"
 TRIAL_SLOW_DEEP = "slow_deep"
 TRIAL_FREE_ACT = "free_act"
 
+# 앱 CSV purpose 컬럼(2026-10-28~): 개발자 설정 데모(시연) 모드가 켜진 동안의 행. 학습·분석에서 뺀다.
+PURPOSE_DEMO = "demo"
+
 # 합성 데이터 생성기가 CSV source 컬럼에 찍는 값(실데이터 CSV 엔 source 컬럼 자체가 없다)
 SOURCE_SYNTHETIC = "synthetic"
 
@@ -81,9 +84,11 @@ def persona_of(raw: dict) -> str:
 
 
 def parse_rows(raw_rows: list[dict]) -> list[Row]:
-    """csv.DictReader 결과 → Row 목록. accel/brake 가 비어 있는 행은 건너뛴다."""
+    """csv.DictReader 결과 → Row 목록. accel/brake 가 비어 있는 행과 시연용(purpose=demo) 행은 건너뛴다."""
     rows: list[Row] = []
     for raw in raw_rows:
+        if raw.get("purpose") == PURPOSE_DEMO:
+            continue
         accel = _float(raw.get("accel"))
         brake = _float(raw.get("brake"))
         if accel is None or brake is None:

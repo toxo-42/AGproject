@@ -40,10 +40,15 @@ class DrivingStyleActivity : AppCompatActivity() {
     tvMetricsTitle = findViewById(R.id.tvMetricsTitle)
     layoutMetrics = findViewById(R.id.layoutMetrics)
     tvNote = findViewById(R.id.tvStyleNote)
+    findViewById<View>(R.id.btnResetStyle).setOnClickListener { confirmReset() }
   }
 
   override fun onResume() {
     super.onResume()
+    refresh()
+  }
+
+  private fun refresh() {
     val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
     val demo = CalibrationPrefs.isStyleDemo(prefs)
     val report = loadReport(CalibrationPrefs.styleState(prefs) ?: "", demo)
@@ -54,6 +59,26 @@ class DrivingStyleActivity : AppCompatActivity() {
     showResult(report)
     showMetrics(report)
     showNote(report, demo)
+  }
+
+  private fun confirmReset() {
+    androidx.appcompat.app.AlertDialog.Builder(this)
+      .setTitle(R.string.title_reset_style_confirm)
+      .setMessage(R.string.msg_reset_style_confirm)
+      .setPositiveButton(R.string.btn_reset_style) { _, _ -> resetStyle() }
+      .setNegativeButton(android.R.string.cancel, null)
+      .show()
+  }
+
+  // prefs 는 여기서 바로 지워 화면을 즉시 갱신하고, 감시 중이면 서비스 메모리의 누적기도 비우게 알린다
+  // (안 그러면 1분 뒤 서비스가 이전 누적을 다시 저장해 되살아난다).
+  private fun resetStyle() {
+    CalibrationPrefs.clearStyleState(getSharedPreferences("AgPrefs", MODE_PRIVATE))
+    if (BleService.monitorState.isActive) {
+      startService(android.content.Intent(this, BleService::class.java).apply { action = BleService.ACTION_RESET_STYLE })
+    }
+    android.widget.Toast.makeText(this, R.string.msg_reset_style_done, android.widget.Toast.LENGTH_SHORT).show()
+    refresh()
   }
 
   private fun loadReport(stateJson: String, demo: Boolean): JSONObject? = try {

@@ -66,7 +66,7 @@ class BleService : Service() {
   // 첫 윈도우가 찰 때 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
   // 저장 위치: filesDir/logs/pedal_yyyyMMdd_HHmmss.csv (권한 불필요, adb pull 로 회수)
   // 컬럼: date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,
-  //        consecutive,label,persona,trial_id,trial_type,trial_phase,accel_median,speed_kmh,speed_acc_kmh
+  //        consecutive,label,persona,trial_id,trial_type,trial_phase,accel_median,speed_kmh,speed_acc_kmh,purpose
   //   (2026-07-17 accel_exceed 제거 + label→accel_high 교체 / 2026-07-18 label 재도입,
   //   accel_rate 추가, accel_score/armed/consecutive 추가(긴 홀드 오조작 미탐지 원인 진단용,
   //   §진행상황_및_로드맵.md 참고) / 2026-09-25 style(강/보통/약) → persona(Persona.id, 미선택 "none") 교체
@@ -76,6 +76,8 @@ class BleService : Service() {
   //   초과"와 어긋난다. 중앙값 >= 임계값이면 정확히 그 조건과 같아서 임계값 학습에 쓴다, prototype/train_thresholds.py)
   //   / 2026-10-25 speed_kmh,speed_acc_kmh 추가(GPS 차량 속도와 그 오차 — 운전 성향 진단 Phase F-2, SpeedTracker.kt.
   //   GPS 는 1Hz 라 4Hz 행에선 같은 값이 반복된다. 권한 없음/fix 없음/3초 이상 끊김이면 "none". 좌표는 안 남긴다)
+  //   / 2026-10-28 purpose 추가("demo"/"train" — 개발자 설정 데모(시연) 모드가 켜진 동안의 행은 "demo".
+  //   PC 학습(prototype/src/dataset.py)이 demo 행을 빼서 시연 주행이 학습 데이터에 섞이지 않게 한다)
   //   - 기록 주기는 200Hz 원시 샘플 전부가 아니라 **판정 윈도우 하나당 1행(4Hz)**이다.
   //     pedal_err/accel_high 가 애초에 4Hz 단위라 200Hz로 찍어도 값이 반복될 뿐이고,
   //     증거자료로서 사람이 열어볼 수 있는 크기가 더 중요하다고 판단(2026-07-13 사용자 결정,
@@ -258,6 +260,8 @@ class BleService : Service() {
     const val ACTION_START_CALIBRATION = "ACTION_START_CALIBRATION"
     const val ACTION_CALIBRATION_DONE = "ACTION_CALIBRATION_DONE"
     const val ACTION_CLEAR_CALIBRATION = "ACTION_CLEAR_CALIBRATION"
+    // 운전 성향(진단) 누적 초기화 — 진단 화면 "운전 패턴 초기화". 경고 임계값(습관 학습)은 건드리지 않는다.
+    const val ACTION_RESET_STYLE = "ACTION_RESET_STYLE"
     const val EXTRA_THRESHOLDS_JSON = "THRESHOLDS_JSON"
     // 캘리브레이션 값 자체는 사용자/페르소나별로 CalibrationPrefs 가 저장한다.
     const val CALIBRATION_DURATION_MS = 15_000L
@@ -378,6 +382,14 @@ class BleService : Service() {
 
     // 캘리브레이션 초기화 — 삭제 후 재설치한 것처럼 되돌린다. 판정은 끄지 않고 기본 임계값으로 돌아간다
     // (페르소나를 골라 둔 상태면 그 프리셋 유지 — 예전엔 페르소나까지 무시하고 판정을 꺼서 수집 데이터가 날아갔다).
+    // 메모리의 누적기도 비워야 한다 — prefs 만 지우면 1분 뒤 saveStyle 이 이전 누적을 다시 써서 되살아난다.
+    if (intent?.action == ACTION_RESET_STYLE) {
+      CalibrationPrefs.clearStyleState(agPrefs())
+      styleTracker = loadStyleTracker()
+      Log.i(tag, "운전 성향 누적 초기화")
+      return START_NOT_STICKY
+    }
+
     if (intent?.action == ACTION_CLEAR_CALIBRATION) {
       CalibrationPrefs.clearUserCalibration(agPrefs())
       // 습관 학습도 처음부터 — 초기화는 "개인화를 전부 되돌린다"는 뜻
@@ -641,7 +653,7 @@ class BleService : Service() {
       val file = java.io.File(dir, "pedal_${ts}.csv")
       java.io.BufferedWriter(java.io.FileWriter(file, true)).also {
         it.write(
-          "date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,consecutive,label,persona,trial_id,trial_type,trial_phase,accel_median,speed_kmh,speed_acc_kmh\n"
+          "date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,consecutive,label,persona,trial_id,trial_type,trial_phase,accel_median,speed_kmh,speed_acc_kmh,purpose\n"
         )
         csvWriter = it
         Log.i(tag, "RAW 로깅 시작: ${file.absolutePath}")
@@ -854,6 +866,7 @@ class BleService : Service() {
         val accelScoreStr = judged?.let { String.format(Locale.US, "%.4f", it.score) } ?: "none"
         val armedStr = judged?.armed?.toString() ?: "none"
         val consecutiveStr = judged?.consecutive?.toString() ?: "none"
+        val purpose = if (CalibrationPrefs.isStyleDemo(agPrefs())) "demo" else "train"
         val speed = speedTracker.current()
         val speedStr = speed?.let { String.format(Locale.US, "%.1f", it.kmh) } ?: "none"
         val speedAccStr = speed?.accuracyKmh?.let { String.format(Locale.US, "%.1f", it) } ?: "none"
@@ -864,7 +877,7 @@ class BleService : Service() {
             "$moduleErr,$pedalErr,$accelHighStr,$accelRateStr,$accelScoreStr,$armedStr,$consecutiveStr," +
             "$label,${currentPersona?.id ?: Persona.NONE_ID}," +
             "${currentTrialId ?: "none"},${currentTrialType ?: "none"},${currentTrialPhase ?: "none"}," +
-            "${String.format(Locale.US, "%.4f", accelMedian)},$speedStr,$speedAccStr\n"
+            "${String.format(Locale.US, "%.4f", accelMedian)},$speedStr,$speedAccStr,$purpose\n"
         )
       } catch (e: Exception) {
         Log.e(tag, "CSV 쓰기 실패: ${e.message}")
