@@ -41,6 +41,7 @@ class Row:
     trial_id: str | None      # 재현 실험 회차("시작시각-회차"), 실험 밖이면 None
     trial_type: str | None
     trial_phase: str | None   # ready/action/rest
+    speed: float | None = None  # GPS 차량 속도 km/h(2026-10-25 이후 CSV 의 speed_kmh). 없거나 "none"이면 None
 
     @property
     def is_normal_driving(self) -> bool:
@@ -98,6 +99,7 @@ def parse_rows(raw_rows: list[dict]) -> list[Row]:
             trial_id=_text(raw.get("trial_id")),
             trial_type=_text(raw.get("trial_type")),
             trial_phase=_text(raw.get("trial_phase")),
+            speed=_float(raw.get("speed_kmh")),
         ))
     return rows
 

@@ -144,5 +144,34 @@
   <string name="desc_pedal_edge">페달을 바꿔 밟으면 다른 앱 위에도 화면 가장자리가 잠깐 빛나요 (엑셀 초록 · 브레이크 파랑)</string>
   <string name="btn_tts_settings">음성 안내 설정</string>
   <string name="btn_close">닫기</string>
+  <string name="btn_driving_style">운전 성향 진단</string>
+
+  <!-- 개발자 설정(설정 톱니 길게 누르기) -->
+  <string name="title_dev_settings">개발자 설정</string>
+  <string name="label_style_demo">진단 데모 모드</string>
+  <string name="desc_style_demo">운전 성향 진단에 필요한 최소 주행 데이터를 낮춰 짧은 주행으로도 결과를 보여줘요</string>
+
+  <!-- 운전 성향 진단(Phase F) — 유형 이름은 돌려 말하지 않는다(2026-10-08 사용자 결정) -->
+  <string name="title_driving_style">운전 성향 진단</string>
+  <string name="style_beginner">초보</string>
+  <string name="style_normal">능숙</string>
+  <string name="style_aggressive">난폭</string>
+  <string name="style_desc_beginner">페달을 조심스럽게, 얕게 밟는 편이에요</string>
+  <string name="style_desc_normal">상황에 맞게 페달을 안정적으로 다뤄요</string>
+  <string name="style_desc_aggressive">페달을 빠르고 깊게, 오래 밟는 편이에요</string>
+  <string name="style_collecting">데이터 모으는 중</string>
+  <string name="style_collecting_desc">페달 사용 %1$d / %2$d회 · 운전하면 자동으로 모여요</string>
+  <string name="style_no_reference">진단 기준을 불러오지 못했어요</string>
+  <string name="style_metrics_title">근거</string>
+  <string name="style_metric_rel_rise">밟는 속도 (평소 깊이 대비)</string>
+  <string name="style_metric_full_press_ratio">끝까지 밟는 비율</string>
+  <string name="style_metric_hold_sec">한 번 밟고 유지하는 시간</string>
+  <string name="style_metric_start_rel_rise">출발할 때 밟는 속도</string>
+  <string name="style_metric_switch_sec">엑셀 → 브레이크 전환 시간</string>
+  <string name="style_metric_harsh_accel_per_h">급가속 (시간당)</string>
+  <string name="style_metric_harsh_decel_per_h">급감속 (시간당)</string>
+  <string name="style_metric_mine">나 %1$s</string>
+  <string name="style_reference_note">기준: 운전 데이터 %1$d구간 · %2$s</string>
+  <string name="style_demo_note">데모 모드 · 최소 데이터 %1$d회 · 기준점 학습 구간 %2$s</string>
   <string name="msg_overlay_permission_needed">\'다른 앱 위에 표시\' 권한을 허용해야 테두리가 보여요</string>
 </resources>

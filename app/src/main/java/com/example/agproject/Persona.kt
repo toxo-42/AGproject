@@ -37,6 +37,10 @@ object CalibrationPrefs {
   private const val KEY_USER_CALIBRATION = "CALIBRATED_THRESHOLDS_JSON"
   // 주행 중 누적 학습 상태(peob.habit.HabitLearner.to_json) — 주행을 넘어 이어진다.
   private const val KEY_HABIT_STATE = "HABIT_STATE_JSON"
+  // 운전 성향 누적 상태(peob.style.StyleTracker.to_json) — 진단 화면이 읽는다.
+  private const val KEY_STYLE_STATE = "STYLE_STATE_JSON"
+  // 개발자 설정 "진단 데모 모드" — 진단 최소 데이터를 낮춘다(peob.style.DEMO_GATE_EVENTS).
+  private const val KEY_STYLE_DEMO = "DEV_STYLE_DEMO"
 
   // 페르소나별 캘리브레이션을 저장하던 시절(2026-09-25, 0008b91)의 키 — 이제 안 쓰고 정리할 때만 지운다.
   private const val LEGACY_KEY_PERSONA_CALIBRATION_PREFIX = "CALIBRATED_THRESHOLDS_JSON_"
@@ -88,10 +92,24 @@ object CalibrationPrefs {
     }
   }
 
-  /** 센서 모듈이 바뀌면 캘리브레이션이 무효 — 지운다(옛 페르소나별 키도 함께 정리). */
+  fun styleState(prefs: SharedPreferences): String? = prefs.getString(KEY_STYLE_STATE, null)
+
+  fun saveStyleState(prefs: SharedPreferences, stateJson: String) {
+    prefs.edit().putString(KEY_STYLE_STATE, stateJson).apply()
+  }
+
+  fun isStyleDemo(prefs: SharedPreferences): Boolean = prefs.getBoolean(KEY_STYLE_DEMO, false)
+
+  fun setStyleDemo(prefs: SharedPreferences, enabled: Boolean) {
+    prefs.edit().putBoolean(KEY_STYLE_DEMO, enabled).apply()
+  }
+
+  /** 센서 모듈이 바뀌면 캘리브레이션이 무효 — 지운다(옛 페르소나별 키도 함께 정리).
+   *  성향 누적도 지운다 — 평소 깊이(p90) 히스토그램이 센서 부착에 따라 달라진다. */
   fun clearAllCalibrations(editor: SharedPreferences.Editor): SharedPreferences.Editor {
     editor.remove(KEY_USER_CALIBRATION)
     editor.remove(KEY_HABIT_STATE)
+    editor.remove(KEY_STYLE_STATE)
     Persona.entries.forEach { editor.remove(LEGACY_KEY_PERSONA_CALIBRATION_PREFIX + it.id) }
     return editor
   }

@@ -57,6 +57,15 @@
           android:layout_height="wrap_content"/>
     </LinearLayout>
 
+    <!-- 운전 성향 진단 화면 진입 (Phase F) -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnOpenDrivingStyle"
+        style="@style/Widget.PeOb.Button.Tonal"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/button_height"
+        android:layout_marginBottom="@dimen/space_sm"
+        android:text="@string/btn_driving_style"/>
+
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnOpenTtsSettings"
         style="@style/Widget.PeOb.Button.Tonal"

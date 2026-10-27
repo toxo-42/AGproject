@@ -20,16 +20,9 @@ from dataclasses import dataclass, fields
 
 from dataset import ROWS_PER_SEC, Row, default_data_dir, load_sessions
 from peob.features import ACCEL_ACTIVE_THRESHOLD
+from peob.style import PressEvent, WindowStream
+from train_style_reference import estimate_brake_on, to_windows
 
-# 브레이크 "밟음" = 구간의 브레이크 하위 20% 값 + 이 여유. 9/27 이후 케이스 예압으로 뗀 상태가 ~0.2 라
-# 고정 기준(0.10)을 쓰면 늘 밟은 것으로 보인다 — calibration.BRAKE_LOW_MARGIN 과 같은 생각.
-BRAKE_ON_MARGIN = 0.10
-# 브레이크를 이만큼 이상 밟고 있다가 STOP_TO_START_SEC 안에 엑셀로 넘어가면 "정차 후 출발"로 본다(속도 없이 쓰는 근사).
-# 4Hz 행에선 엑셀을 밟는 그 행엔 이미 브레이크를 뗀 상태라 "시작 순간 밟고 있었나"로 보면 하나도 안 잡힌다.
-STOP_HOLD_SEC = 2.0
-STOP_TO_START_SEC = 1.0
-# 엑셀을 뗀 뒤 이 시간 안에 브레이크를 밟아야 "페달 전환"으로 센다
-SWITCH_MAX_SEC = 3.0
 # 구간에 엑셀 이벤트가 이보다 적으면 지표가 의미 없어 버린다
 MIN_EVENTS_PER_CHUNK = 5
 
@@ -38,15 +31,10 @@ ACTED = ("beginner", "normal", "aggressive")
 
 
 @dataclass(frozen=True)
-class PressEvent:
-    peak: float         # 이벤트 중 최고 깊이
-    rise: float         # 0.25초당 최대 증가량(밟는 속도)
-    duration_sec: float
-    after_stop: bool    # 브레이크를 STOP_HOLD_SEC 이상 밟다가 뗀 직후(STOP_TO_START_SEC 안) 시작했는가
-
-
-@dataclass(frozen=True)
 class StyleMetrics:
+    """분석용 지표(절대값 포함) — 앱 진단 지표(peob.style.StyleMetrics, 상대·시간 지표)와 별개.
+    이벤트·전환 추출은 앱과 같은 peob.style.WindowStream 을 쓴다(2026-10-25 이관 — 이 파일에 따로 있던 구현 제거)."""
+
     depth_p50: float        # 밟고 있을 때 깊이 중앙값
     depth_p90: float        # 밟고 있을 때 깊이 상위 10%
     peak_p50: float         # 이벤트별 최고 깊이 중앙값
@@ -65,65 +53,22 @@ def _quantile(values: list[float], q: float) -> float:
     return s[min(int(q * len(s)), len(s) - 1)]
 
 
-def brake_on_level(rows: list[Row]) -> float:
-    return _quantile([r.brake for r in rows], 0.2) + BRAKE_ON_MARGIN
-
-
-def press_events(rows: list[Row], brake_on: float) -> list[PressEvent]:
-    """엑셀 밟기 시작~떼기를 이벤트 하나로 묶는다."""
+def stream_rows(rows: list[Row], brake_on: float) -> tuple[list[PressEvent], list[float]]:
+    """(엑셀 이벤트, 페달 전환 시간) — 앱과 같은 추출기에 행을 차례로 흘린다."""
+    stream = WindowStream(brake_on)
     events: list[PressEvent] = []
-    start: int | None = None
-    after_stop_at_start = False
-    brake_run = 0               # 지금 이어지고 있는 브레이크 밟음 행 수
-    long_stop_ended_at = -10**9  # STOP_HOLD_SEC 이상 이어진 브레이크를 마지막으로 뗀 행
-    for i, row in enumerate(rows):
-        if row.brake >= brake_on:
-            brake_run += 1
-        else:
-            if brake_run >= STOP_HOLD_SEC * ROWS_PER_SEC:
-                long_stop_ended_at = i
-            brake_run = 0
-        pressed = row.level >= ACCEL_ACTIVE_THRESHOLD
-        if pressed and start is None:
-            start = i
-            after_stop_at_start = i - long_stop_ended_at <= STOP_TO_START_SEC * ROWS_PER_SEC
-        elif not pressed and start is not None:
-            events.append(_event(rows, start, i, after_stop_at_start))
-            start = None
-    return events
-
-
-def _event(rows: list[Row], start: int, end: int, after_stop: bool) -> PressEvent:
-    levels = [rows[j].level for j in range(max(0, start - 1), end)]
-    rise = max((b - a for a, b in zip(levels, levels[1:])), default=0.0)
-    return PressEvent(
-        peak=max(r.level for r in rows[start:end]),
-        rise=max(rise, 0.0),
-        duration_sec=(end - start) / ROWS_PER_SEC,
-        after_stop=after_stop,
-    )
-
-
-def pedal_switch_times(rows: list[Row], brake_on: float) -> list[float]:
-    """엑셀을 뗀 순간부터 브레이크를 밟기까지 걸린 시간(초) 목록."""
-    times: list[float] = []
-    released_at: int | None = None
-    for i in range(1, len(rows)):
-        if rows[i - 1].level >= ACCEL_ACTIVE_THRESHOLD > rows[i].level:
-            released_at = i
-        if released_at is not None and rows[i].brake >= brake_on:
-            gap = (i - released_at) / ROWS_PER_SEC
-            if gap <= SWITCH_MAX_SEC:
-                times.append(gap)
-            released_at = None
-        elif released_at is not None and rows[i].level >= ACCEL_ACTIVE_THRESHOLD:
-            released_at = None   # 브레이크 없이 다시 엑셀 — 전환 아님
-    return times
+    switches: list[float] = []
+    for w in to_windows(rows):
+        event, switch, *_ = stream.step(w)
+        if event is not None:
+            events.append(event)
+        if switch is not None:
+            switches.append(switch)
+    return events, switches
 
 
 def style_metrics(rows: list[Row]) -> StyleMetrics | None:
-    brake_on = brake_on_level(rows)
-    events = press_events(rows, brake_on)
+    events, switches = stream_rows(rows, estimate_brake_on(rows))
     if len(events) < MIN_EVENTS_PER_CHUNK:
         return None
     pressed = [r.level for r in rows if r.level >= ACCEL_ACTIVE_THRESHOLD]
@@ -137,7 +82,7 @@ def style_metrics(rows: list[Row]) -> StyleMetrics | None:
         start_rise_p50=_quantile([e.rise for e in events if e.after_stop], 0.5),
         events_per_min=len(events) / (len(rows) / ROWS_PER_SEC / 60),
         duration_mean_sec=statistics.fmean(e.duration_sec for e in events),
-        switch_p50_sec=_quantile(pedal_switch_times(rows, brake_on), 0.5),
+        switch_p50_sec=_quantile(switches, 0.5),
     )
 
 

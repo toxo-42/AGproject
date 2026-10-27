@@ -67,6 +67,11 @@ class DeviceManagerActivity : AppCompatActivity() {
     btnOpenSettings.setOnClickListener {
       showSettingsDialog()
     }
+    // 길게 누르면 개발자 설정(일반 사용자에겐 숨김) — 개발·시연용 스위치를 여기에 모은다
+    btnOpenSettings.setOnLongClickListener {
+      showDevSettingsDialog()
+      true
+    }
 
     // 로깅 데이터 추출(Phase E) — 세션 선택 후 CSV를 공유 시트로 내보낸다.
     val btnExportLogs = findViewById<ImageButton>(R.id.btnExportLogs)
@@ -151,12 +156,31 @@ class DeviceManagerActivity : AppCompatActivity() {
       }
     }
 
+    dialogView.findViewById<Button>(R.id.btnOpenDrivingStyle).setOnClickListener {
+      dialog.dismiss()
+      startActivity(Intent(this, DrivingStyleActivity::class.java))
+    }
     dialogView.findViewById<Button>(R.id.btnOpenTtsSettings).setOnClickListener {
       dialog.dismiss()
       showTTSSettingsDialog()
     }
     dialogView.findViewById<Button>(R.id.btnCloseSettings).setOnClickListener { dialog.dismiss() }
 
+    dialog.show()
+  }
+
+  // 개발자 설정 다이얼로그 — 개발·시연용 항목. 항목이 늘면 dialog_dev_settings.xml 에 한 줄씩 추가한다.
+  private fun showDevSettingsDialog() {
+    val dialogView = layoutInflater.inflate(R.layout.dialog_dev_settings, null)
+    val dialog = AlertDialog.Builder(this).setView(dialogView).create()
+    dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    val swStyleDemo = dialogView.findViewById<MaterialSwitch>(R.id.swStyleDemo)
+    swStyleDemo.isChecked = CalibrationPrefs.isStyleDemo(prefs)
+    swStyleDemo.setOnCheckedChangeListener { _, checked -> CalibrationPrefs.setStyleDemo(prefs, checked) }
+
+    dialogView.findViewById<Button>(R.id.btnCloseDevSettings).setOnClickListener { dialog.dismiss() }
     dialog.show()
   }
 

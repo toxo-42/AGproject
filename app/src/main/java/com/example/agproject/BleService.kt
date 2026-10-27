@@ -163,6 +163,11 @@ class BleService : Service() {
   @Volatile private var habitLearner: PyObject? = null
   private var lastHabitSaveMs = 0L
 
+  // ── 운전 성향 누적 (peob.style.StyleTracker, Phase F) ──────────────
+  // 안전 판정과 분리된 진단용. 습관 학습과 같은 규칙으로 사용자 본인 주행만 누적·저장한다(진단 화면이 prefs 에서 읽음).
+  @Volatile private var styleTracker: PyObject? = null
+  private var lastStyleSaveMs = 0L
+
   // ── 연속형 개인화 캘리브레이션 상태 ──────────────────────────────
   // 계산된 임계값이 있으면(null 이 아니면) judgeWindow 가 profile 대신 이걸 쓴다.
   // 이전 세션에 캘리브레이션한 값이 있으면 연결 시점에 prefs 에서 복원해 재사용한다
@@ -397,6 +402,7 @@ class BleService : Service() {
     // 캘리브레이션 임계값이 있으면 복원 — 매 주행마다 다시 캘리브레이션할 필요 없다. 없으면 기본값.
     // 습관 학습값이 있으면 accel_high 는 그걸로(주행 시작 시점 적용). 서비스가 이미 떠 있으면 누적 상태를 이어간다.
     if (habitLearner == null) habitLearner = loadHabitLearner()
+    if (styleTracker == null) styleTracker = loadStyleTracker()
     currentPersona = CalibrationPrefs.currentPersona(agPrefs())
     applyCalibratedThresholds(readCalibratedThresholds())
     Log.i(tag, "판정 임계값: $calibratedThresholdsJson")
@@ -445,6 +451,7 @@ class BleService : Service() {
     closeCsvWriter()   // 세션 로그 파일 flush + close
     speedTracker.stop()
     saveHabit()        // 주행 끝 — 마지막 1분치 누적도 남긴다
+    saveStyle()
     appliedThresholdsJson = null
     pedalEdgeOverlay.detach()   // WRONG_DEVICE 로 끝나면 setMonitorState 를 거치지 않으므로 직접 뗀다
     // UUID 불일치로 스스로 종료한 경우엔 그 사실을 화면에 남겨 두려고 WRONG_DEVICE 유지
@@ -697,6 +704,38 @@ class BleService : Service() {
     }
   }
 
+  private fun loadStyleTracker(): PyObject? = try {
+    Python.getInstance().getModule("peob.style")
+      .callAttr("load_tracker", CalibrationPrefs.styleState(agPrefs()) ?: "")
+  } catch (e: Exception) {
+    Log.e(tag, "운전 성향 상태 복원 실패: ${e.message}", e)
+    null
+  }
+
+  // 판정 윈도우 하나를 성향 누적에 넣는다 — 습관 학습과 같은 제외 규칙(영점 조절 중·재현 실험·개발자 페르소나).
+  // 브레이크 "밟음" 기준은 판정·테두리와 같은 brake_low(예압 반영), 속도는 GPS(없으면 None → 급가감속 지표 생략).
+  private fun learnStyle(accelMedian: Double, brake: Double, judged: JudgeResult?, nowMs: Long) {
+    val tracker = styleTracker ?: return
+    if (judged == null || currentPersona != null || currentTrialId != null) return
+    try {
+      tracker.callAttr("add_window", accelMedian, brake, pedalStateTracker.brakePressOn, speedTracker.current()?.kmh)
+      if (nowMs - lastStyleSaveMs >= HABIT_SAVE_INTERVAL_MS) saveStyle()
+    } catch (e: Exception) {
+      Log.e(tag, "운전 성향 누적 실패: ${e.message}", e)
+    }
+  }
+
+  private fun saveStyle() {
+    val tracker = styleTracker ?: return
+    if (agPrefs().getString("TARGET_ADDRESS", null) == null) return   // saveHabit 과 같은 이유(기기 해제 직후)
+    try {
+      CalibrationPrefs.saveStyleState(agPrefs(), tracker.callAttr("to_json").toString())
+      lastStyleSaveMs = System.currentTimeMillis()
+    } catch (e: Exception) {
+      Log.e(tag, "운전 성향 상태 저장 실패: ${e.message}", e)
+    }
+  }
+
   private fun saveHabit() {
     val learner = habitLearner ?: return
     // 기기 등록 해제 직후(stopService → onDestroy)엔 prefs 를 이미 지웠으므로 되살리지 않는다
@@ -942,6 +981,7 @@ class BleService : Service() {
       val sortedAccels = window.map { it[0] }.sorted()
       val accelMedian = sortedAccels[sortedAccels.size / 2]
       learnHabit(accelMedian, judged, nowMs)
+      learnStyle(accelMedian, last[1], judged, nowMs)
       writeRawCsv(nowMs, accel = last[0], brake = last[1], accelMedian = accelMedian, label = currentLabel, judged = judged)
       flushRawCsv()
     }
