@@ -1,10 +1,6 @@
 package com.example.agproject
 
 import android.annotation.SuppressLint
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.*
 import android.bluetooth.le.*
@@ -12,7 +8,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import androidx.core.app.NotificationCompat
+import com.chaquo.python.PyObject
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import org.json.JSONObject
@@ -22,7 +18,7 @@ import java.util.*
 
 class BleService : Service() {
 
-  private val channelId = "BleCriticalChannel_v2"
+  private lateinit var alerts: SafetyAlerts   // 알림·음성·전체화면 경고 출력
   private val tag = "BleService"
   private var targetAddress: String? = null
 
@@ -42,91 +38,58 @@ class BleService : Service() {
   // RAW 샘플을 모았다가 윈도우가 차면 Python judge_json 에 통째로 넘긴다.
   // 윈도잉 책임은 Kotlin 쪽(여기). Python은 판정만 한다.
   private val sampleBuffer = ArrayList<List<Double>>(WINDOW_SIZE)
-  private var lastMisopShown = false   // 같은 오조작 연속 트리거 방지(예시)
   private var lastCnt = -1             // 직전 샘플 cnt (누락 검출용, -1 = 아직 없음)
 
-  // 급발진은 순간 스파이크가 아니라 "꾹 밟고 유지"하는 패턴이라, 윈도우 1개(0.25초)만 보고
-  // 바로 경고하면 찰나의 오조작(밟았다 바로 뗌)까지 잡아버린다. 그래서 misop=true 가 여러
-  // 윈도우 연속으로 나와야 실제 경고를 띄운다(MISOP_SUSTAIN_WINDOWS, 2026-07-13 사용자 결정).
-  private var consecutiveMisopWindows = 0
-  // 지속 카운트 도중 아주 잠깐 misop=false 로 떨어져도(센서 노이즈 등) 카운트를 바로 리셋하지
-  // 않고 봐주는 여유 구간(MISOP_GAP_TOLERANCE_WINDOWS). 이 여유를 넘겨야 실제 회복으로 본다.
-  private var misopGapWindows = 0
+  // 오조작 경고 상태기계(trigger→무장→지속시간→여유) — Python judge.MisopDetector 인스턴스.
+  // 2026-09-24 Kotlin 필드(armed/consecutive/gap/shown)에서 Python 으로 이관(Kotlin=UI,
+  // Python=판정 backend 방향). 임계값이 바뀔 때마다 applyCalibratedThresholds() 가 새로 만든다.
+  // null = 패턴 파악(캘리브레이션) 진행 중 → 판정 안 함. 캘리브레이션 전에는 기본 임계값으로 만든다.
+  @Volatile private var detector: PyObject? = null
+  // 판정 호출(step_json) 연속 실패 수 — JudgeStatus.FAILURE_LIMIT 에 닿으면 판정 오류로 알린다. 성공하거나 detector 를 새로 만들면 0.
+  @Volatile private var consecutiveJudgeFailures = 0
 
-  // 급조작(찰나에 확 밟음)과 서서히 깊게 밟는 정상 주행을 구분하기 위한 무장(arm) 상태
-  // (2026-07-14 사용자 결정). judge.py 의 "trigger"(엑셀 변화율 급증)가 한 번 나와야
-  // armed=true 가 되고, 그 이후에만 위 지속시간 카운트가 진행된다 — 즉 "레벨이 계속
-  // 유지되는가"는 트리거로 무장된 뒤에만 의미를 갖는다. gap tolerance 초과로 회복
-  // 판정되면 armed 도 함께 해제되어, 다음 경고를 띄우려면 트리거가 다시 발동해야 한다.
-  private var armed = false
-
-  // onPedalMisoperation() 이 실제로 호출된 그 윈도우 하나만 표시하는 1회성 플래그.
-  // judgeWindow() 가 세우고, 바로 뒤 writeRawCsv() 가 읽자마자 끈다(2026-07-17 사용자 결정
-  // — CSV의 pedal_err 는 "misop 레벨 조건이 유지되는 매 순간"이 아니라 "경고가 실제로
-  // 발동한 그 순간"만 남겨야 증거자료로서 의미가 있다는 피드백).
-  private var pedalErrorJustFired = false
+  // judgeWindow() 한 번의 결과. writeRawCsv() 가 같은 윈도우 행을 쓸 때 인자로 받는다.
+  // fired 는 onPedalMisoperation() 이 실제로 호출된 그 윈도우에서만 true(2026-07-17 사용자 결정
+  // — CSV의 pedal_err 는 "경고가 실제로 발동한 그 순간"만 남겨야 증거자료로서 의미가 있다).
+  private data class JudgeResult(
+    val score: Double,      // 레벨 조건 hits 비율 (high_ratio 와 비교)
+    val rate: Double,       // 50ms 간격 엑셀 델타 최댓값 (accel_rate_high 와 비교)
+    val armed: Boolean,
+    val consecutive: Int,
+    val fired: Boolean,
+  )
 
   // ── RAW 원시 샘플 CSV 로깅 (Phase A/E: 학습 데이터 + 증거자료) ──────────
-  // 첫 윈도우가 찰 때 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
-  // 저장 위치: filesDir/logs/pedal_yyyyMMdd_HHmmss.csv (권한 불필요, adb pull 로 회수)
-  // 컬럼: date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,
-  //        consecutive,label,style
-  //   (2026-07-17 accel_exceed 제거 + label→accel_high 교체 / 2026-07-18 label 재도입,
-  //   accel_rate 추가, accel_score/armed/consecutive 추가(긴 홀드 오조작 미탐지 원인 진단용,
-  //   §진행상황_및_로드맵.md 참고) — 아래 참고)
-  //   - 기록 주기는 200Hz 원시 샘플 전부가 아니라 **판정 윈도우 하나당 1행(4Hz)**이다.
-  //     pedal_err/accel_high 가 애초에 4Hz 단위라 200Hz로 찍어도 값이 반복될 뿐이고,
-  //     증거자료로서 사람이 열어볼 수 있는 크기가 더 중요하다고 판단(2026-07-13 사용자 결정,
-  //     처음엔 200Hz 전부 남겼다가 "초당 데이터가 너무 많다"는 피드백으로 축소).
-  //     brake/accel 은 그 윈도우의 마지막 샘플 값을 대표값으로 쓴다.
-  //   - date/time: 사람이 읽을 수 있는 형식(원시 epoch 대신).
-  //   - module_err: 그 순간 미해결 장치 오류가 있었는지("module_err"/"none",
-  //     isErrorDialogShowing 그대로). 0/1 대신 문자열로 남겨 바로 알아볼 수 있게 함(2026-07-13).
-  //   - pedal_err: onPedalMisoperation() 이 실제로 발동한 그 윈도우 한 행만 "pedal_err",
-  //     나머지는 "none"(2026-07-17 사용자 결정). 예전엔 misop 레벨 조건이 유지되는 매 윈도우마다
-  //     찍었는데, judge.py 에 변화율(미분) 트리거가 추가되면서 "완만하게 계속 깊게 밟는 상태"와
-  //     "실제로 경고가 뜬 사건"이 달라졌다 — 후자만 남겨야 증거자료로서 의미가 있다.
-  //     pedalErrorJustFired 플래그로 판정한다. ⚠️ 알고리즘이 자동으로 트리거한 것이라
-  //     캘리브레이션 전(accel_high 미설정)이면 judgeWindow 가 판정 자체를 건너뛰어 항상 "none"이다
-  //     — 아래 label(수동)과는 독립적인, 실시간 감지 결과일 뿐이라는 점에 주의.
-  //   - accel_high: 그 순간 적용 중인 개인화 임계값(캘리브레이션 전이면 "none").
-  //   - accel_rate: judge_calibrated_json 이 계산한 그 윈도우의 "rate"(RATE_LAG_SAMPLES=50ms
-  //     떨어진 두 샘플 간 엑셀 델타의 최댓값) — accel_rate_high(급조작 트리거 임계값)와 직접
-  //     비교되는 값 그 자체. 판정 자체가 스킵된 윈도우(캘리브레이션 중/전)는 "none"
-  //     (2026-07-18 사용자 요청 — accel_rate_high 실측 튜닝에 쓸 실제 값 분포를 보기 위함).
-  //   - accel_score: 그 윈도우의 "score"(레벨 조건 hits 비율) — high_ratio와 직접 비교되는
-  //     값. 스킵된 윈도우는 "none".
-  //   - armed: judgeWindow() 처리 후 그 시점의 무장 상태(§armed 필드). 인스턴스 상태를 그대로
-  //     찍는 거라 스킵된 윈도우도 직전 값이 이어진다(judgeWindow 밖에서는 안 바뀌므로 혼동 없음).
-  //   - consecutive: 그 시점의 consecutiveMisopWindows(연속 misop 윈도우 카운트).
-  //     accel_score/armed/consecutive 셋 다 "긴 홀드형 오조작 재현이 왜 반복적으로 안 잡히는지"
-  //     진단용으로 추가(2026-07-18) — 로그캣 없이 CSV만으로 무장이 언제 풀렸는지 재구성 가능.
-  //   - label: 수동 오조작 라벨링(개발자용 지도학습 정답, Phase A, 0=정상/1=오조작 재현).
-  //     2026-07-17에 "실주행에서 항상 0으로만 찍힌다"는 이유로 accel_high로 교체하며 없앴는데,
-  //     의도적으로 오조작을 재현하며 라벨을 남기는 세션(바로 이 currentLabel 자체가 그 정답)에서는
-  //     그 판단이 틀렸다 — 라벨 누른 시점이 CSV 어디에도 안 남아서 지도학습 데이터가 통째로
-  //     유실됐다(2026-07-18 사용자 피드백). accel_high 는 그대로 두고 label 을 별도 컬럼으로 복원.
-  //   - style: 개발자 전용 강/보통/약 스타일 라벨(그대로 유지).
-  //
-  // BLE notify 콜백은 여러 바인더 스레드에서 올라온다 → BufferedWriter 접근은 전부 csvLock 아래에서.
-  // csvClosed 는 종료 후 뒤늦게 도착한 콜백이 새 세션 파일을 되살리는 것을 막는다.
-  private val csvLock = Any()
-  private var csvWriter: java.io.BufferedWriter? = null
-  private var csvClosed = false
-  private val csvDateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
-  private val csvTimeFormat = java.text.SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+  // 파일·형식·잠금은 PedalCsvLogger(컬럼 의미·변경 이력도 거기). 여기선 한 행의 값만 모아 넘긴다(writeRawCsv).
+  private lateinit var csvLogger: PedalCsvLogger
 
   // ── 라벨링 (Phase A: 지도학습용 정답 수집) ────────────────────────
-  // MainActivity 의 '오조작' 토글이 ACTION_SET_LABEL 로 갱신한다.
+  // 개발자 재현 실험 화면(TrialActivity)이 ACTION_SET_TRIAL 로 구간마다 갱신한다(수동 토글은 2026-09-25 대체).
   // BLE 콜백 스레드가 읽고 UI 스레드가 쓰므로 @Volatile 필요.
   @Volatile private var currentLabel = LABEL_NORMAL
 
-  // 개발자 전용 스타일 라벨링(강/보통/약) — 오조작 라벨과 별개로, CSV 행마다 "지금 어떤
-  // 스타일로 밟는 중인가"를 남긴다. DataCollectActivity 의 개발자 모드에서만 노출된다.
-  @Volatile private var currentStyle = STYLE_UNSET
+  // 진행 중인 재현 실험 회차/종류/구간 — 실험 밖이면 null. CSV 에 그대로 찍히고,
+  // 실험 중 경고가 발동하면 전체화면 경고 대신 ACTION_TRIAL_FIRED 로 실험 화면에만 알린다.
+  @Volatile private var currentTrialId: String? = null
+  @Volatile private var currentTrialType: String? = null
+  @Volatile private var currentTrialPhase: String? = null
+
+  // 개발자 데이터 수집 페르소나(null = 사용자 본인) — 고르면 그 프리셋으로 판정하고, CSV persona 컬럼에 찍는다.
+  // 감시 시작 시 prefs 에서 읽고, 개발자 수집 화면에서 바꾸면 ACTION_SET_PERSONA 로 다시 읽는다.
+  @Volatile private var currentPersona: Persona? = null
 
   // 수집 화면이 떠 있는 동안만 true. BLE 콜백 스레드가 읽고 메인 스레드가 쓴다.
   @Volatile private var liveStreamEnabled = false
+
+  // ── 페달 테두리 표시 (사용자 설정, 기본 on) ─────────────────────────
+  // 페달이 바뀌는 순간 다른 앱 위에 은은한 테두리를 띄운다(PedalEdgeOverlay).
+  // 창은 MONITORING 동안만 붙어 있다(setMonitorState 참고). 설정은 BLE 콜백 스레드가 읽고 메인 스레드가 쓴다.
+  @Volatile private var pedalEdgeEnabled = true
+  // 오조작 경고 화면(CriticalActivity)이 보이는 동안 true — 경고 위에 초록/파랑이 겹치지 않게 테두리를 뗀다.
+  @Volatile private var criticalShowing = false
+  private lateinit var pedalEdgeOverlay: PedalEdgeOverlay
+  private lateinit var speedTracker: SpeedTracker
+  private val pedalStateTracker = PedalStateTracker()
 
   // ── 로그 스로틀링 ────────────────────────────────────────────────
   // 배치 50Hz / 판정 4Hz 로 로그를 찍으면 logcat 링버퍼가 몇 분 만에 밀려 나가
@@ -138,18 +101,19 @@ class BleService : Service() {
   private var lastLoggedMisop: Boolean? = null
   private var lastTextMessage: String? = null
 
-  // judge_calibrated_json 의 "rate"(윈도우 내 최대 엑셀 변화량, accel_rate_high와 직접
-  // 비교되는 값) — accel_rate_high 실측 튜닝을 위해 CSV로 노출한다(2026-07-18 사용자 요청).
-  // judgeWindow()가 스킵되는 윈도우(캘리브레이션 중/전)는 null로 둬서 "이 윈도우는 판정
-  // 자체를 안 했다"와 "판정했는데 변화가 0이었다"를 구분한다.
-  private var lastAccelRate: Double? = null
+  // ── 습관 학습 (peob.habit.HabitLearner) ──────────────────────────
+  // 주행하면서 평소 엑셀 깊이를 누적해 accel_high 를 개인화한다. 상태는 prefs 에 JSON 으로 저장돼 주행을 넘어 이어진다.
+  // 적용 시점은 주행 시작(readCalibratedThresholds) + 주행 중 게이트를 처음 넘는 순간뿐 — 그 뒤 갱신은 다음 주행부터.
+  @Volatile private var habitLearner: PyObject? = null
+  private var lastHabitSaveMs = 0L
 
-  // 긴 홀드형 오조작 재현이 반복적으로 놓쳐지는 원인 진단용(2026-07-18) — "score"(레벨
-  // 조건 hits 비율, high_ratio와 직접 비교되는 값)를 CSV로 노출해, 긴 홀드 도중 레벨 조건이
-  // 실제로 끊기는지(score가 high_ratio 밑으로 떨어지는지) 로그캣 없이 CSV만으로 재구성할 수
-  // 있게 한다. armed/consecutiveMisopWindows는 이미 있는 인스턴스 필드를 그대로 CSV에 찍어서
-  // "그 순간 무장 상태였는지, 지속 카운트가 몇이었는지"까지 같이 본다.
-  private var lastMisopScore: Double? = null
+  // ── 운전 성향 누적 (peob.style.StyleTracker, Phase F) ──────────────
+  // 안전 판정과 분리된 진단용. 습관 학습과 같은 규칙으로 사용자 본인 주행만 누적·저장한다(진단 화면이 prefs 에서 읽음).
+  @Volatile private var styleTracker: PyObject? = null
+  private var lastStyleSaveMs = 0L
+  // publishLearningProgress 가 직전에 공개한 이벤트 수 — 바뀌었을 때만 다시 계산·방송한다(윈도우 4Hz 마다 하면 낭비)
+  private var publishedHabitEvents = -1
+  private var publishedStyleEvents = -1
 
   // ── 연속형 개인화 캘리브레이션 상태 ──────────────────────────────
   // 계산된 임계값이 있으면(null 이 아니면) judgeWindow 가 profile 대신 이걸 쓴다.
@@ -168,6 +132,32 @@ class BleService : Service() {
   private var calibrationStartMs = 0L
 
   companion object {
+    /** 화면에 공개하는 상태 한 묶음(ServiceState 참고). 쓰기는 이 서비스의 updateState 만. */
+    @Volatile var state = ServiceState()
+      private set
+    private val stateLock = Any()
+
+    /**
+     * 상태 묶음을 바꿔 끼우고 바뀌기 전 묶음을 돌려준다(호출하는 쪽이 "실제로 바뀌었나"를 비교해 방송 여부를 정한다).
+     * 메인 스레드와 BLE 콜백 스레드가 둘 다 쓰므로 읽고-고치고-쓰기를 잠금 안에서 한다 — 안 그러면 한쪽 변경이 사라진다.
+     * 잠금 안에서는 copy() 만 한다(방송·Python 호출은 밖에서) — BLE 흐름을 붙잡지 않고, 다른 잠금과 얽히지 않는다.
+     */
+    private fun updateState(change: (ServiceState) -> ServiceState): ServiceState = synchronized(stateLock) {
+      val before = state
+      state = change(before)
+      before
+    }
+
+    // 서비스 안에서 자주 읽는 두 값 — 예전 이름을 읽기 전용으로 남겨 BLE 콜백 등 호출부를 바꾸지 않는다.
+    private val monitorState: MonitorState get() = state.monitor
+    private val judgeStatus: JudgeStatus get() = state.judge
+
+    const val ACTION_MONITOR_STATE = "ACTION_MONITOR_STATE"
+    const val ACTION_THRESHOLDS_CHANGED = "ACTION_THRESHOLDS_CHANGED"
+    const val ACTION_LEARNING_PROGRESS = "ACTION_LEARNING_PROGRESS"
+    // 설정(데모 모드 등)이 바뀌어 진단 보고서를 지금 다시 계산해 달라는 요청 — 다음 이벤트까지 기다리지 않게
+    const val ACTION_PUBLISH_PROGRESS = "ACTION_PUBLISH_PROGRESS"
+
     // Nordic UART Service (NUS) 표준 UUID
     private val NUS_SERVICE = UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
     private val NUS_RX = UUID.fromString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E") // 폰 -> 기기 (Write)
@@ -187,45 +177,41 @@ class BleService : Service() {
     // STM32 200Hz 원천 스트림 기준. 50샘플 = 0.25초 윈도우 (튜닝 대상)
     private const val WINDOW_SIZE = 50
 
-    // ── 오조작 지속시간 판정 (2026-07-13 사용자 결정) ────────────────────
-    // 급발진 시나리오는 엑셀을 브레이크로 착각해 "꾹 밟고 유지"하는 패턴이라, 짧은 스파이크성
-    // 오조작(밟았다 바로 뗌)과 구분하려면 misop=true 가 일정 시간 이상 연속으로 나와야 한다.
-    // 값은 전부 실측 튜닝 전 임시값 — 실제로 밟아보면서 조정할 것.
-    private const val MISOP_SUSTAIN_WINDOWS = 1       // window 1 = 0.25 sec
-    private const val MISOP_GAP_TOLERANCE_WINDOWS = 1
-
     // 로그 스로틀 주기 (수신 요약 / 판정 하트비트)
     private const val RAW_LOG_INTERVAL_MS = 5_000L
     private const val JUDGE_LOG_INTERVAL_MS = 10_000L
 
-    // ── 라벨링/프로필 (Phase A) ─────────────────────────────────────
-    // MainActivity 가 오조작 토글을 누를 때 보내는 인텐트.
-    const val ACTION_SET_LABEL = "ACTION_SET_LABEL"
+    // ── 라벨링/재현 실험 (Phase A) ──────────────────────────────────
+    // 실험 화면이 구간(준비/조작/휴식)이 바뀔 때마다 보낸다. EXTRA_TRIAL_ID 가 없으면 실험 종료.
+    const val ACTION_SET_TRIAL = "ACTION_SET_TRIAL"
+    const val EXTRA_TRIAL_ID = "TRIAL_ID"
+    const val EXTRA_TRIAL_TYPE = "TRIAL_TYPE"
+    const val EXTRA_TRIAL_PHASE = "TRIAL_PHASE"
     const val EXTRA_LABEL = "LABEL"
+    // 실험 중 경고가 발동하면 보낸다(EXTRA_TRIAL_ID = 그때의 회차) — 실험 화면이 감지 회차를 센다.
+    const val ACTION_TRIAL_FIRED = "ACTION_TRIAL_FIRED"
 
     const val LABEL_NORMAL = 0   // 정상 주행 구간
     const val LABEL_MISOP = 1    // 오조작 재현 구간
 
-    // 개발자 전용 스타일 라벨링(강/보통/약) — 로지스틱 회귀 feature 비교용 원시 데이터에
-    // 태그를 남긴다. 실시간 판정(임계값)에는 전혀 영향을 주지 않는다(캘리브레이션과 무관).
-    const val ACTION_SET_STYLE = "ACTION_SET_STYLE"
-    const val EXTRA_STYLE = "STYLE"
-
-    const val STYLE_UNSET = "unset"
-    const val STYLE_STRONG = "strong"
-    const val STYLE_NORMAL = "normal"
-    const val STYLE_WEAK = "weak"
+    // 개발자 페르소나 변경 알림 — 선택값은 CalibrationPrefs 에 이미 저장된 상태로 보낸다(서비스는 다시 읽기만).
+    const val ACTION_SET_PERSONA = "ACTION_SET_PERSONA"
 
     // ── 연속형 개인화 캘리브레이션 (Phase B, calibration.py 대응) ──────────
     // 3단계 프로필(discrete) 방식은 실측에서 경계가 불안정해 폐기했다(§진행상황_및_로드맵.md
     // Phase B). 캘리브레이션 세션에서 뽑은 accel_active_p90 + 오프셋으로 개인별 accel_high 를
-    // 직접 계산하는 이 방식만 쓴다. 캘리브레이션 전에는 판정 자체를 하지 않는다(judgeWindow 참고).
+    // 직접 계산하는 이 방식만 쓴다. 캘리브레이션 전에는 기본 임계값으로 판정한다(readCalibratedThresholds 참고).
     const val ACTION_START_CALIBRATION = "ACTION_START_CALIBRATION"
     const val ACTION_CALIBRATION_DONE = "ACTION_CALIBRATION_DONE"
     const val ACTION_CLEAR_CALIBRATION = "ACTION_CLEAR_CALIBRATION"
+    // 운전 성향(진단) 누적 초기화 — 진단 화면 "운전 패턴 초기화". 경고 임계값(습관 학습)은 건드리지 않는다.
+    const val ACTION_RESET_STYLE = "ACTION_RESET_STYLE"
     const val EXTRA_THRESHOLDS_JSON = "THRESHOLDS_JSON"
-    const val PREF_CALIBRATED_THRESHOLDS = "CALIBRATED_THRESHOLDS_JSON"
-    const val CALIBRATION_DURATION_MS = 30_000L
+    // 캘리브레이션 값 자체는 사용자/페르소나별로 CalibrationPrefs 가 저장한다.
+    const val CALIBRATION_DURATION_MS = 15_000L
+
+    // 습관 학습 상태 저장 주기 — 주행이 끝나면 onDestroy 에서도 저장한다.
+    private const val HABIT_SAVE_INTERVAL_MS = 60_000L
 
     // 캘리브레이션 시작 시각(epoch ms) — 화면(DataCollectActivity)이 다른 앱으로 전환됐다가
     // 돌아왔을 때 "지금 캘리브레이션이 진행 중인지, 얼마나 남았는지"를 되살리는 용도(2026-07-14).
@@ -242,11 +228,24 @@ class BleService : Service() {
     const val ACTION_LIVE_SAMPLES = "ACTION_LIVE_SAMPLES"
     const val EXTRA_ACCELS = "ACCELS"   // FloatArray, 배치 내 샘플 순서
     const val EXTRA_BRAKES = "BRAKES"   // FloatArray, 같은 길이
+
+    // 페달 테두리 표시 on/off — 설정 화면이 prefs 에 저장한 뒤 이 action 으로 알린다(서비스는 다시 읽기만).
+    const val ACTION_SET_PEDAL_EDGE = "ACTION_SET_PEDAL_EDGE"
+    const val PREF_PEDAL_EDGE_ENABLED = "PEDAL_EDGE_ENABLED"
+
+    // 경고 화면 표시/닫힘 알림 (CriticalActivity onStart/onStop)
+    const val ACTION_SET_CRITICAL_SHOWING = "ACTION_SET_CRITICAL_SHOWING"
+    const val EXTRA_CRITICAL_SHOWING = "CRITICAL_SHOWING"
   }
 
   override fun onCreate() {
     super.onCreate()
-    createNotificationChannel()
+    alerts = SafetyAlerts(this)
+    alerts.createChannel()
+    pedalEdgeOverlay = PedalEdgeOverlay(this)
+    csvLogger = PedalCsvLogger(java.io.File(filesDir, "logs"))
+    speedTracker = SpeedTracker(this)
+    pedalEdgeEnabled = agPrefs().getBoolean(PREF_PEDAL_EDGE_ENABLED, true)
     val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
     bluetoothAdapter = bluetoothManager.adapter
     bluetoothLeScanner = bluetoothAdapter?.bluetoothLeScanner
@@ -255,6 +254,14 @@ class BleService : Service() {
     if (!Python.isStarted()) {
       Python.start(AndroidPlatform(this))
     }
+    val learnedInfo = try {
+      Python.getInstance().getModule("peob.learned").callAttr("learned_info_json").toString().ifEmpty { null }
+    } catch (e: Exception) {
+      Log.e(tag, "학습 결과 읽기 실패: ${e.message}", e)
+      null
+    }
+    updateState { it.copy(learnedInfoJson = learnedInfo) }
+    Log.i(tag, "번들된 학습 결과: ${learnedInfo ?: "없음(지금 규칙 사용)"}")
   }
 
   @SuppressLint("ForegroundServiceType")
@@ -273,21 +280,22 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
-    // 오조작 라벨 토글. 이후 기록되는 CSV 행의 label 컬럼이 이 값으로 찍힌다.
-    if (intent?.action == ACTION_SET_LABEL) {
-      currentLabel = if (intent.getIntExtra(EXTRA_LABEL, LABEL_NORMAL) == LABEL_MISOP) {
-        LABEL_MISOP
-      } else {
-        LABEL_NORMAL
-      }
-      Log.i(tag, "라벨 변경: label=$currentLabel (${if (currentLabel == LABEL_MISOP) "오조작" else "정상"})")
+    // 재현 실험 구간 변경. 이후 기록되는 CSV 행의 label/trial_* 컬럼이 이 값으로 찍힌다.
+    if (intent?.action == ACTION_SET_TRIAL) {
+      currentTrialId = intent.getStringExtra(EXTRA_TRIAL_ID)
+      val active = currentTrialId != null
+      currentTrialType = if (active) intent.getStringExtra(EXTRA_TRIAL_TYPE) else null
+      currentTrialPhase = if (active) intent.getStringExtra(EXTRA_TRIAL_PHASE) else null
+      currentLabel = if (active && intent.getIntExtra(EXTRA_LABEL, LABEL_NORMAL) == LABEL_MISOP) LABEL_MISOP else LABEL_NORMAL
+      Log.i(tag, "실험 구간: id=$currentTrialId type=$currentTrialType phase=$currentTrialPhase label=$currentLabel")
       return START_NOT_STICKY
     }
 
-    // 개발자 전용 스타일 라벨 토글(강/보통/약). 이후 기록되는 CSV 행의 style 컬럼이 이 값으로 찍힌다.
-    if (intent?.action == ACTION_SET_STYLE) {
-      currentStyle = intent.getStringExtra(EXTRA_STYLE) ?: STYLE_UNSET
-      Log.i(tag, "스타일 변경: style=$currentStyle")
+    // 페르소나 변경 — 그 프리셋(또는 "없음"이면 사용자 캘리브레이션)으로 즉시 교체(패턴 파악 중이면 끝난 뒤 반영).
+    if (intent?.action == ACTION_SET_PERSONA) {
+      currentPersona = CalibrationPrefs.currentPersona(agPrefs())
+      if (!isCalibrating) applyCalibratedThresholds(readCalibratedThresholds())
+      Log.i(tag, "페르소나 변경: ${currentPersona?.id ?: Persona.NONE_ID}")
       return START_NOT_STICKY
     }
 
@@ -298,20 +306,58 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
+    // 페달 테두리 표시 on/off — 감시 중이면 바로 붙이거나 뗀다.
+    if (intent?.action == ACTION_SET_PEDAL_EDGE) {
+      pedalEdgeEnabled = agPrefs().getBoolean(PREF_PEDAL_EDGE_ENABLED, true)
+      updatePedalEdgeOverlay()
+      Log.i(tag, "페달 테두리 표시: $pedalEdgeEnabled")
+      return START_NOT_STICKY
+    }
+
+    // 경고 화면이 떠 있는 동안엔 테두리를 끈다.
+    if (intent?.action == ACTION_SET_CRITICAL_SHOWING) {
+      criticalShowing = intent.getBooleanExtra(EXTRA_CRITICAL_SHOWING, false)
+      updatePedalEdgeOverlay()
+      return START_NOT_STICKY
+    }
+
     // 패턴 파악(연속형 캘리브레이션) 시작. 이미 감시 중인 세션에 바로 적용되며 재연결이 필요 없다.
+    // 감시 중(MONITORING)이 아니면 시작하지 않는다 — 종료 판정이 데이터 도착에 묶여 있어 데이터 없이 시작하면 끝나지 않고,
+    // 그 상태로 다음 감시가 시작되면 연결 직후 첫 배치(샘플 몇 개)로 엉뚱한 영점이 저장됐다(2026-10-28 발견).
     if (intent?.action == ACTION_START_CALIBRATION) {
+      if (monitorState != MonitorState.MONITORING) {
+        Log.w(tag, "감시 중이 아니라 영점 조절 요청 무시: $monitorState")
+        return START_NOT_STICKY
+      }
       startCalibration()
       return START_NOT_STICKY
     }
 
-    // 캘리브레이션 초기화 — 삭제 후 재설치한 것처럼 되돌린다. 다시 패턴 파악하기 전까지
-    // judgeWindow 가 판정을 건너뛰므로(calibratedThresholdsJson == null) 오조작 감지도 꺼진다.
+    // 설정(데모 모드 등)이 바뀌었다 — 다음 엑셀 이벤트까지 기다리지 않고 진단 보고서를 지금 다시 계산해 공개한다.
+    if (intent?.action == ACTION_PUBLISH_PROGRESS) {
+      publishLearningProgress(force = true)
+      return START_NOT_STICKY
+    }
+
+    // 운전 성향 누적 초기화. 메모리의 누적기도 비워야 한다 — prefs 만 지우면 1분 뒤 saveStyle 이 이전 누적을 다시 써서 되살아난다.
+    if (intent?.action == ACTION_RESET_STYLE) {
+      CalibrationPrefs.clearStyleState(agPrefs())
+      styleTracker = loadStyleTracker()
+      publishLearningProgress(force = true)
+      Log.i(tag, "운전 성향 누적 초기화")
+      return START_NOT_STICKY
+    }
+
+    // 캘리브레이션 초기화 — 삭제 후 재설치한 것처럼 되돌린다. 판정은 끄지 않고 기본 임계값으로 돌아간다
+    // (페르소나를 골라 둔 상태면 그 프리셋 유지 — 예전엔 페르소나까지 무시하고 판정을 꺼서 수집 데이터가 날아갔다).
     if (intent?.action == ACTION_CLEAR_CALIBRATION) {
-      applyCalibratedThresholds(null)
-      getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
-        .remove(PREF_CALIBRATED_THRESHOLDS)
-        .apply()
-      Log.i(tag, "캘리브레이션 초기화 — 판정 중단 상태로 복귀")
+      CalibrationPrefs.clearUserCalibration(agPrefs())
+      // 습관 학습도 처음부터 — 초기화는 "개인화를 전부 되돌린다"는 뜻
+      CalibrationPrefs.clearHabitState(agPrefs())
+      habitLearner = loadHabitLearner()
+      applyCalibratedThresholds(readCalibratedThresholds())
+      publishLearningProgress(force = true)
+      Log.i(tag, "캘리브레이션 초기화 — 기본 임계값으로 복귀: $calibratedThresholdsJson")
       return START_NOT_STICKY
     }
 
@@ -326,13 +372,20 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
-    // 이전에 캘리브레이션해 둔 임계값이 있으면 복원 — 매 주행마다 다시 캘리브레이션할 필요 없다.
+    // 캘리브레이션 임계값이 있으면 복원 — 매 주행마다 다시 캘리브레이션할 필요 없다. 없으면 기본값.
+    // 습관 학습값이 있으면 accel_high 는 그걸로(주행 시작 시점 적용). 서비스가 이미 떠 있으면 누적 상태를 이어간다.
+    if (habitLearner == null) habitLearner = loadHabitLearner()
+    if (styleTracker == null) styleTracker = loadStyleTracker()
+    publishLearningProgress(force = true)
+    currentPersona = CalibrationPrefs.currentPersona(agPrefs())
     applyCalibratedThresholds(readCalibratedThresholds())
-    if (calibratedThresholdsJson != null) {
-      Log.i(tag, "캘리브레이션된 임계값 복원: $calibratedThresholdsJson")
-    }
+    Log.i(tag, "판정 임계값: $calibratedThresholdsJson")
 
     startForegroundServiceNotification("타겟 감시 중: $targetAddress")
+    speedTracker.start()   // 포그라운드 진입 후에 시작해야 백그라운드에서도 위치를 받는다
+    setMonitorState(MonitorState.CONNECTING)
+    // 위 임계값 적용 때 판정 오류가 났어도 그땐 감시 전이라 알리지 않았다 — 이제 알린다
+    if (judgeStatus == JudgeStatus.FAILED) announceJudgeStatus(wasFailed = false)
     startTargetScan()
 
     return START_NOT_STICKY
@@ -371,7 +424,19 @@ class BleService : Service() {
   override fun onDestroy() {
     // 순서 중요: GATT 를 먼저 끊어야 뒤늦은 notify 콜백이 세션 파일을 되살리지 않는다.
     disconnectGatt()
-    closeCsvWriter()   // 세션 로그 파일 flush + close
+    csvLogger.close()   // 세션 로그 파일 flush + close
+    speedTracker.stop()
+    saveHabit()        // 주행 끝 — 마지막 1분치 누적도 남긴다
+    saveStyle()
+    // 실시간 학습 값을 비워 화면이 방금 저장한 prefs 를 읽게 하고, 판정 상태는 다음 감시가 이전 오류를 물려받지 않게 되돌린다
+    // (판정 상태 변화의 방송은 아래 STOPPED 가 한다)
+    updateState {
+      it.copy(liveHabitStateJson = null, liveStyleReportJson = null, appliedThresholdsJson = null, judge = JudgeStatus.ACTIVE)
+    }
+    sendBroadcastToActivity(ACTION_LEARNING_PROGRESS)
+    pedalEdgeOverlay.detach()   // WRONG_DEVICE 로 끝나면 setMonitorState 를 거치지 않으므로 직접 뗀다
+    // UUID 불일치로 스스로 종료한 경우엔 그 사실을 화면에 남겨 두려고 WRONG_DEVICE 유지
+    if (monitorState != MonitorState.WRONG_DEVICE) setMonitorState(MonitorState.STOPPED)
     super.onDestroy()
   }
 
@@ -405,6 +470,8 @@ class BleService : Service() {
     @SuppressLint("MissingPermission")
     override fun onScanResult(callbackType: Int, result: ScanResult?) {
       result?.let {
+        // stopScan 전에 결과가 여러 번 올 수 있다 — 두 번째부터는 무시해 GATT 가 중복 생성되지 않게
+        if (bluetoothGatt != null) return
         Log.i(tag, "기기 발견! 연결 시도 중...")
         bluetoothLeScanner?.stopScan(this)
         connectToDevice(it.device)
@@ -424,10 +491,18 @@ class BleService : Service() {
     override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
       if (newState == BluetoothProfile.STATE_CONNECTED) {
         Log.i(tag, "[성공] 기기 연결됨! 서비스를 탐색합니다...")
-        updateNotification("기기 연결됨 - 오조작 감지 중...")
+        // 판정 오류 중이면 그 문구를 유지한다(연결됐다고 보호받는 건 아니다)
+        if (judgeStatus != JudgeStatus.FAILED) updateNotification("기기 연결됨 - 오조작 감지 중...")
         gatt?.discoverServices()
       } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-        Log.w(tag, "연결 끊김. 재연결 시도...")
+        // 이미 정리한 GATT(서비스 종료 등)에서 뒤늦게 온 콜백이면 무시 — 종료된 서비스가 다시 스캔하지 않게
+        if (gatt == null || gatt != bluetoothGatt) return
+        Log.w(tag, "연결 끊김(status=$status). 재연결 시도...")
+        setMonitorState(MonitorState.RECONNECTING)
+        // 끊긴 GATT 를 닫고 비워야 startTargetScan() 의 "이미 연결 중" 가드를 통과한다.
+        // (이전엔 안 비워서 한 번 끊기면 재연결이 영영 시작되지 않았음)
+        gatt.close()
+        bluetoothGatt = null
         startTargetScan()
       }
     }
@@ -460,6 +535,7 @@ class BleService : Service() {
       }
 
       saveStatus("정상 연결")
+      setMonitorState(MonitorState.MONITORING)
       sendBroadcastToActivity("ACTION_UUID_MATCHED")
 
       // 규격 §6: notify 구독 '전에' MTU를 키워야 한다.
@@ -529,46 +605,178 @@ class BleService : Service() {
     isErrorDialogShowing = true
 
     Log.w(tag, "[주의] 장치 오류 감지")
-    playVoiceFile("ERROR")
+    alerts.playVoice("ERROR")
     updateNotification("주의: 장치 오류 발생")
-    showHeadsUpNotification("장치 오류", "장치를 점검해주세요!")
+    alerts.showHeadsUp("장치 오류", "장치를 점검해주세요!")
     sendBroadcastToActivity("ACTION_MODULE_ERROR")
   }
 
-  // ── RAW 원시 샘플 CSV 로깅 헬퍼 (Phase A) ──────────────────────────
-  // 모두 csvLock 아래에서 호출된다고 가정한다(호출부: writeRawCsv/flushRawCsv/closeCsvWriter).
-  // 최초 호출 시점에 세션 파일을 lazy 로 연다. 실패해도 판정 흐름은 계속되도록 예외를 삼킨다.
-  private fun ensureCsvWriterLocked(): java.io.BufferedWriter? {
-    if (csvClosed) return null   // 서비스 종료 후 도착한 콜백 → 새 세션 파일을 열지 않는다
-    csvWriter?.let { return it }
+  private fun agPrefs() = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+
+  // 판정에 쓸 임계값 JSON — 개발자 페르소나 프리셋 > 사용자 캘리브레이션 > 기본값(calibration.DEFAULT_ACCEL_HIGH).
+  // 사용자 경로엔 PC 학습 결과(채택된 경우만)가 반영된다: 변화율은 learned.apply_learned_json, accel_high 공식은 습관 학습 안에서.
+  // 페르소나 프리셋엔 반영하지 않는다 — 수집 조건이 학습 결과에 따라 바뀌면 데이터끼리 비교가 안 된다.
+  // 페르소나가 아니면 accel_high 는 습관 학습값이 준비된 경우 그걸로 덮는다(brake_low 등은 캘리브레이션 값 유지 —
+  // 15초 캘리브레이션은 습관보다 브레이크 예압 0점 보정에 더 의미가 있다, 2026-10-01 사용자 결정).
+  // 캘리브레이션 전에도 판정을 켜 두는 이유: 첫 주행도 보호하고, CSV 에 변화율(accel_rate)이 빠짐없이 남게.
+  // null 은 Python 호출이 실패했을 때뿐이다(그땐 판정이 꺼진다).
+  private fun readCalibratedThresholds(): String? {
+    val persona = currentPersona
     return try {
-      val dir = java.io.File(filesDir, "logs").apply { if (!exists()) mkdirs() }
-      val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-      val file = java.io.File(dir, "pedal_${ts}.csv")
-      java.io.BufferedWriter(java.io.FileWriter(file, true)).also {
-        it.write(
-          "date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,consecutive,label,style\n"
-        )
-        csvWriter = it
-        Log.i(tag, "RAW 로깅 시작: ${file.absolutePath}")
-      }
+      val calibration = Python.getInstance().getModule("peob.calibration")
+      if (persona != null) return calibration.callAttr("preset_thresholds_json", persona.accelHigh).toString()
+      val saved = CalibrationPrefs.userCalibration(agPrefs())
+        ?: calibration.callAttr("default_thresholds_json").toString()
+      val base = Python.getInstance().getModule("peob.learned").callAttr("apply_learned_json", saved).toString()
+      habitLearner?.callAttr("apply_json", base)?.toString() ?: base
     } catch (e: Exception) {
-      Log.e(tag, "CSV 로깅 파일 생성 실패: ${e.message}", e)
+      Log.e(tag, "프리셋/기본 임계값 생성 실패: ${e.message}", e)
       null
     }
   }
 
-  private fun readCalibratedThresholds(): String? =
-    getSharedPreferences("AgPrefs", MODE_PRIVATE).getString(PREF_CALIBRATED_THRESHOLDS, null)
+  private fun loadHabitLearner(): PyObject? = try {
+    Python.getInstance().getModule("peob.habit")
+      .callAttr("load_learner", CalibrationPrefs.habitState(agPrefs()) ?: "")
+  } catch (e: Exception) {
+    Log.e(tag, "습관 학습 상태 복원 실패: ${e.message}", e)
+    null
+  }
 
-  // calibratedThresholdsJson 과 currentAccelHigh(캐시)를 항상 같이 갱신 — 따로 손대면
-  // 둘이 어긋나서 CSV의 accel_exceed 가 실제 판정 임계값과 다른 값을 쓰게 된다.
+  // 판정 윈도우 하나를 습관 학습에 넣는다 — 사용자 본인의 정상 주행만. 패턴 파악 중(judged == null)·재현 실험·
+  // 개발자 페르소나는 일부러 세게/다르게 밟는 구간이라 뺀다. 경고 앞뒤 구간은 HabitLearner 가 스스로 뺀다.
+  private fun learnHabit(accelMedian: Double, judged: JudgeResult?, nowMs: Long) {
+    val learner = habitLearner ?: return
+    if (judged == null || currentPersona != null || currentTrialId != null) return
+    try {
+      val reachedGate = learner.callAttr("add_window", accelMedian, judged.fired).toBoolean()
+      if (reachedGate) {
+        // 첫 개인화 — 주행 중 임계값이 바뀌는 유일한 순간
+        applyCalibratedThresholds(readCalibratedThresholds())
+        Log.i(tag, "습관 학습 게이트 도달 — 임계값 적용: $calibratedThresholdsJson")
+        saveHabit()
+      } else if (nowMs - lastHabitSaveMs >= HABIT_SAVE_INTERVAL_MS) {
+        saveHabit()
+      }
+    } catch (e: Exception) {
+      Log.e(tag, "습관 학습 실패: ${e.message}", e)
+    }
+  }
+
+  private fun loadStyleTracker(): PyObject? = try {
+    Python.getInstance().getModule("peob.style")
+      .callAttr("load_tracker", CalibrationPrefs.styleState(agPrefs()) ?: "")
+  } catch (e: Exception) {
+    Log.e(tag, "운전 성향 상태 복원 실패: ${e.message}", e)
+    null
+  }
+
+  // 판정 윈도우 하나를 성향 누적에 넣는다 — 습관 학습과 같은 제외 규칙(영점 조절 중·재현 실험·개발자 페르소나).
+  // 브레이크 "밟음" 기준은 판정·테두리와 같은 brake_low(예압 반영), 속도는 GPS(없으면 None → 급가감속 지표 생략).
+  private fun learnStyle(accelMedian: Double, brake: Double, judged: JudgeResult?, nowMs: Long) {
+    val tracker = styleTracker ?: return
+    if (judged == null || currentPersona != null || currentTrialId != null) return
+    try {
+      tracker.callAttr("add_window", accelMedian, brake, pedalStateTracker.brakePressOn, speedTracker.current()?.kmh)
+      if (nowMs - lastStyleSaveMs >= HABIT_SAVE_INTERVAL_MS) saveStyle()
+    } catch (e: Exception) {
+      Log.e(tag, "운전 성향 누적 실패: ${e.message}", e)
+    }
+  }
+
+  // 학습 진행을 화면에 실시간으로 공개한다. 이벤트 수가 그대로면 아무것도 안 한다(force 면 무조건).
+  // 진단 보고서는 지금 데모 모드 설정 기준으로 서비스가 계산한다 — 화면은 Python 누적기를 직접 건드리지 않는다.
+  // 평소엔 BLE 콜백 스레드에서 불리지만 force 호출(onStartCommand)은 메인 스레드라 add_window 와 겹칠 수 있다
+  // — 읽기만 하는 계산이라 GIL 아래에서 깨지지 않고, 실패해도 다음 이벤트에 다시 공개된다.
+  private fun publishLearningProgress(force: Boolean = false) {
+    try {
+      val habitEvents = habitLearner?.get("events")?.toInt() ?: -1
+      val styleEvents = styleTracker?.get("events")?.callAttr("__len__")?.toInt() ?: -1
+      if (!force && habitEvents == publishedHabitEvents && styleEvents == publishedStyleEvents) return
+      publishedHabitEvents = habitEvents
+      publishedStyleEvents = styleEvents
+      val habitJson = habitLearner?.callAttr("to_json")?.toString()
+      val styleJson = styleTracker?.callAttr("report_json", CalibrationPrefs.isStyleDemo(agPrefs()))?.toString()
+      updateState { it.copy(liveHabitStateJson = habitJson, liveStyleReportJson = styleJson) }
+      sendBroadcastToActivity(ACTION_LEARNING_PROGRESS)
+    } catch (e: Exception) {
+      Log.e(tag, "학습 진행 공개 실패: ${e.message}", e)
+    }
+  }
+
+  private fun saveStyle() {
+    val tracker = styleTracker ?: return
+    if (agPrefs().getString("TARGET_ADDRESS", null) == null) return   // saveHabit 과 같은 이유(기기 해제 직후)
+    try {
+      CalibrationPrefs.saveStyleState(agPrefs(), tracker.callAttr("to_json").toString())
+      lastStyleSaveMs = System.currentTimeMillis()
+    } catch (e: Exception) {
+      Log.e(tag, "운전 성향 상태 저장 실패: ${e.message}", e)
+    }
+  }
+
+  private fun saveHabit() {
+    val learner = habitLearner ?: return
+    // 기기 등록 해제 직후(stopService → onDestroy)엔 prefs 를 이미 지웠으므로 되살리지 않는다
+    if (agPrefs().getString("TARGET_ADDRESS", null) == null) return
+    try {
+      CalibrationPrefs.saveHabitState(agPrefs(), learner.callAttr("to_json").toString())
+      lastHabitSaveMs = System.currentTimeMillis()
+    } catch (e: Exception) {
+      Log.e(tag, "습관 학습 상태 저장 실패: ${e.message}", e)
+    }
+  }
+
+  // calibratedThresholdsJson, currentAccelHigh(캐시), detector, 페달 테두리 브레이크 기준을 항상 같이 갱신 —
+  // 따로 손대면 CSV의 accel_high 나 판정 상태기계·테두리가 실제 임계값과 어긋난다.
+  // 임계값이 바뀌면 상태기계도 새로 만든다(이전 임계값 기준의 무장/지속 상태는 이어가지 않는다).
   private fun applyCalibratedThresholds(json: String?) {
     calibratedThresholdsJson = json
     currentAccelHigh = try {
       json?.let { JSONObject(it).getDouble("accel_high") }
     } catch (e: Exception) {
       null
+    }
+    // 테두리의 "브레이크 밟음"도 판정과 같은 brake_low 기준(예압 offset 반영). 캘리브레이션 전엔 기본 0.10.
+    pedalStateTracker.brakePressOn = try {
+      json?.let { JSONObject(it).getDouble("brake_low") }
+    } catch (e: Exception) {
+      null
+    } ?: PedalStateTracker.PRESS_ON
+    detector = try {
+      json?.let { Python.getInstance().getModule("peob.judge").callAttr("new_detector", it) }
+    } catch (e: Exception) {
+      Log.e(tag, "판정 상태기계 생성 실패: ${e.message}", e)
+      null
+    }
+    consecutiveJudgeFailures = 0
+    updateState { it.copy(appliedThresholdsJson = json) }
+    sendBroadcastToActivity(ACTION_THRESHOLDS_CHANGED)
+    refreshJudgeStatus()
+  }
+
+  // 판정 상태를 다시 계산해, 바뀌었으면 공개·방송한다. 감시 중일 때만 알림을 띄운다
+  // (감시 시작 전에 이미 오류였던 경우는 onStartCommand 가 감시 상태로 들어간 뒤 직접 알린다).
+  private fun refreshJudgeStatus() {
+    val status = JudgeStatus.of(isCalibrating, detector != null, consecutiveJudgeFailures)
+    val before = updateState { it.copy(judge = status) }
+    if (before.judge == status) return
+    val wasFailed = before.judge == JudgeStatus.FAILED
+    Log.i(tag, "판정 상태: $status")
+    if (monitorState.isActive) announceJudgeStatus(wasFailed)
+    sendBroadcastToActivity(ACTION_MONITOR_STATE)
+  }
+
+  // 판정 오류면 상단 알림 문구를 바꾸고 헤드업으로 한 번 알린다. 오류에서 풀렸으면 원래 문구로 되돌린다.
+  // 음성은 쓰지 않는다 — 가진 음성 파일은 "장치 오류"용이라 상황과 다르다.
+  private fun announceJudgeStatus(wasFailed: Boolean) {
+    if (judgeStatus == JudgeStatus.FAILED) {
+      updateNotification("판정 오류 — 오조작 경고가 동작하지 않습니다")
+      alerts.showHeadsUp("판정 오류", "지금은 페달 오조작 경고가 뜨지 않습니다")
+    } else if (wasFailed) {
+      updateNotification(
+        if (monitorState == MonitorState.MONITORING) "기기 연결됨 - 오조작 감지 중..." else "타겟 감시 중: $targetAddress"
+      )
     }
   }
 
@@ -588,8 +796,9 @@ class BleService : Service() {
     Log.i(tag, "캘리브레이션 시작 (${CALIBRATION_DURATION_MS / 1000}초) — 완료 전까지 판정 중단")
   }
 
-  // 캘리브레이션 종료 — 모은 샘플을 calibration.calibrate_thresholds_json 에 넘겨
-  // 개인화된 임계값을 계산하고, 즉시 적용 + prefs 에 저장(다음 주행에도 재사용).
+  // 캘리브레이션(브레이크 영점 조절) 종료 — 모은 샘플을 calibration.zero_brake_thresholds_json 에 넘겨
+  // brake_low(예압 반영)를 계산하고, 즉시 적용 + prefs 에 저장(다음 주행에도 재사용).
+  // accel_high 는 15초로 못 잰다(2026-10-01 분석) — 기본값으로 두고 습관 학습이 덮어쓴다.
   private fun finishCalibration() {
     isCalibrating = false
     getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
@@ -599,7 +808,8 @@ class BleService : Service() {
     calibrationBuffer.clear()
 
     if (samples.isEmpty()) {
-      Log.w(tag, "캘리브레이션 실패: 수집된 샘플 없음")
+      Log.w(tag, "캘리브레이션 실패: 수집된 샘플 없음 — 이전 임계값으로 판정 재개")
+      applyCalibratedThresholds(readCalibratedThresholds())
       return
     }
 
@@ -608,77 +818,52 @@ class BleService : Service() {
       for (sample in samples) samplesJson.put(org.json.JSONArray(sample))
 
       val thresholdsJson = Python.getInstance()
-        .getModule("calibration")
-        .callAttr("calibrate_thresholds_json", samplesJson.toString())
+        .getModule("peob.calibration")
+        .callAttr("zero_brake_thresholds_json", samplesJson.toString())
         .toString()
 
-      applyCalibratedThresholds(thresholdsJson)
-      getSharedPreferences("AgPrefs", MODE_PRIVATE).edit()
-        .putString(PREF_CALIBRATED_THRESHOLDS, thresholdsJson)
-        .apply()
+      CalibrationPrefs.saveUserCalibration(agPrefs(), thresholdsJson)
+      // 도중에 페르소나를 골랐으면 그 프리셋으로 판정을 이어간다
+      applyCalibratedThresholds(readCalibratedThresholds())
 
-      Log.i(tag, "캘리브레이션 완료 (${samples.size}샘플): $thresholdsJson")
+      Log.i(tag, "캘리브레이션 완료(${samples.size}샘플): $thresholdsJson")
 
       // 다른 앱으로 전환된 상태라 ACTION_CALIBRATION_DONE 브로드캐스트를 놓쳐도(§DataCollectActivity
       // onResume 재동기화로 화면은 커버됨) 완료 사실 자체는 시스템 알림으로 바로 알려준다(2026-07-14).
-      showHeadsUpNotification("PeOb", "패턴 파악이 완료되었습니다")
+      alerts.showHeadsUp("PeOb", "브레이크 영점 조절이 완료되었습니다")
 
       val intent = Intent(ACTION_CALIBRATION_DONE)
       intent.setPackage(packageName)
       intent.putExtra(EXTRA_THRESHOLDS_JSON, thresholdsJson)
       sendBroadcast(intent)
     } catch (e: Exception) {
-      Log.e(tag, "캘리브레이션 계산 실패: ${e.message}", e)
+      Log.e(tag, "캘리브레이션 계산 실패: ${e.message} — 이전 임계값으로 판정 재개", e)
+      applyCalibratedThresholds(readCalibratedThresholds())
     }
   }
 
-  private fun writeRawCsv(recvMs: Long, accel: Double, brake: Double, label: Int) {
-    synchronized(csvLock) {
-      val w = ensureCsvWriterLocked() ?: return
-      try {
-        val d = Date(recvMs)
-        // 0/1 대신 문자열로 남겨서 CSV를 열어봤을 때 바로 무슨 뜻인지 알 수 있게 한다.
-        val moduleErr = if (isErrorDialogShowing) "module_err" else "none"
-        // 경고가 실제로 발동한 그 윈도우 한 행에서만 true — 읽는 즉시 꺼서 다음 행엔 안 남는다.
-        val pedalErr = if (pedalErrorJustFired) "pedal_err" else "none"
-        pedalErrorJustFired = false
-        val accelHighNow = currentAccelHigh
-        val accelHighStr = if (accelHighNow != null) String.format(Locale.US, "%.4f", accelHighNow) else "none"
-        val accelRateNow = lastAccelRate
-        val accelRateStr = if (accelRateNow != null) String.format(Locale.US, "%.4f", accelRateNow) else "none"
-        val accelScoreNow = lastMisopScore
-        val accelScoreStr = if (accelScoreNow != null) String.format(Locale.US, "%.4f", accelScoreNow) else "none"
-        // accel/brake 는 소수 4자리로 반올림(Q31 원본보다 촘촘할 필요 없음 → 줄 크기 안정).
-        w.write(
-          "${csvDateFormat.format(d)},${csvTimeFormat.format(d)}," +
-            "${String.format(Locale.US, "%.4f", brake)},${String.format(Locale.US, "%.4f", accel)}," +
-            "$moduleErr,$pedalErr,$accelHighStr,$accelRateStr,$accelScoreStr,$armed,$consecutiveMisopWindows," +
-            "$label,$currentStyle\n"
-        )
-      } catch (e: Exception) {
-        Log.e(tag, "CSV 쓰기 실패: ${e.message}")
-      }
-    }
+  // judged == null: 판정을 건너뛴 윈도우(패턴 파악 중) — 판정 관련 컬럼은 "none".
+  private fun writeRawCsv(
+    recvMs: Long, accel: Double, brake: Double, accelMedian: Double, label: Int, judged: JudgeResult?,
+  ) {
+    val speed = speedTracker.current()
+    csvLogger.write(
+      PedalCsvRow(
+        recvMs = recvMs, brake = brake, accel = accel,
+        moduleErr = isErrorDialogShowing,
+        pedalErr = judged?.fired == true,   // 경고가 실제로 발동한 그 윈도우 한 행에서만
+        accelHigh = currentAccelHigh,
+        accelRate = judged?.rate, accelScore = judged?.score, armed = judged?.armed, consecutive = judged?.consecutive,
+        label = label, persona = currentPersona?.id ?: Persona.NONE_ID,
+        trialId = currentTrialId, trialType = currentTrialType, trialPhase = currentTrialPhase,
+        accelMedian = accelMedian, speedKmh = speed?.kmh, speedAccKmh = speed?.accuracyKmh,
+        demo = CalibrationPrefs.isStyleDemo(agPrefs()),
+      )
+    )
   }
 
-  private fun flushRawCsv() {
-    synchronized(csvLock) {
-      try { csvWriter?.flush() } catch (e: Exception) { Log.w(tag, "CSV flush 실패: ${e.message}") }
-    }
-  }
-
-  private fun closeCsvWriter() {
-    synchronized(csvLock) {
-      try {
-        csvWriter?.flush()
-        csvWriter?.close()
-      } catch (e: Exception) {
-        Log.w(tag, "CSV 닫기 실패: ${e.message}")
-      }
-      csvWriter = null
-      csvClosed = true
-    }
-  }
+  // handleRawData(BLE 수신 처리)를 건드리지 않으려고 호출 이름을 유지한다
+  private fun flushRawCsv() = csvLogger.flush()
 
   // ── 기기 -> 폰 raw 바이너리 처리 (엑셀/페달 오조작 로컬 판단 입력부) ──────────
   // 50Hz 로 들어오는 배치 프레임(count + RawSample×N)을 디코딩해 윈도우에 쌓고,
@@ -740,6 +925,9 @@ class BleService : Service() {
 
       liveAccels?.set(i, accel.toFloat())
       liveBrakes?.set(i, brake.toFloat())
+
+      // 200Hz 로 비교만 하고, 페달이 바뀐 순간에만 화면(메인 스레드)으로 넘긴다
+      if (pedalEdgeEnabled) pedalStateTracker.update(accel, brake)?.let(pedalEdgeOverlay::flash)
     }
 
     if (isCalibrating && nowMs - calibrationStartMs >= CALIBRATION_DURATION_MS) {
@@ -758,200 +946,108 @@ class BleService : Service() {
     if (sampleBuffer.size >= WINDOW_SIZE) {
       val window = ArrayList(sampleBuffer)   // 복사본 전달
       sampleBuffer.clear()
-      judgeWindow(window)   // lastLoggedMisop 를 이 윈도우 결과로 갱신 — 아래 CSV 기록이 최신값을 씀
+      val judged = judgeWindow(window)
 
       // CSV는 200Hz 전부가 아니라 판정 주기(4Hz, 윈도우 하나당 1행)로만 남긴다.
       // misop/accel_exceed 는 애초에 4Hz 판정 단위라 200Hz로 찍어도 값이 반복될 뿐이고,
       // 증거자료 목적상 사람이 열어볼 수 있는 크기가 더 중요하다고 판단(2026-07-13 사용자 결정).
       val last = window.last()
-      writeRawCsv(nowMs, accel = last[0], brake = last[1], label = currentLabel)
+      val sortedAccels = window.map { it[0] }.sorted()
+      val accelMedian = sortedAccels[sortedAccels.size / 2]
+      learnHabit(accelMedian, judged, nowMs)
+      learnStyle(accelMedian, last[1], judged, nowMs)
+      publishLearningProgress()
+      writeRawCsv(nowMs, accel = last[0], brake = last[1], accelMedian = accelMedian, label = currentLabel, judged = judged)
       flushRawCsv()
     }
   }
 
-  // 윈도우 하나를 Python judge_calibrated_json 에 넘겨 오조작 여부를 판정한다.
+  // 윈도우 하나를 Python judge.MisopDetector 에 넘겨 판정하고, 경고 발동이면 알린다.
+  // 판정 규칙과 상태(무장/지속/여유)는 전부 Python 쪽에 있다 — 여기는 호출·로그·경고 표시만 한다.
   //
-  // 패턴 파악(캘리브레이션) 중이거나, 아직 한 번도 캘리브레이션한 적이 없으면
-  // 판정 자체를 건너뛴다 — 그렇지 않으면 캘리브레이션 도중 세게 밟는 순간에
-  // 오조작 경고가 떠서 데이터 수집이 불편해진다.
-  // "임계값 미설정 = 아직 판정 안 함"이 지금 채택한 모델이다.
-  private fun judgeWindow(window: List<List<Double>>) {
-    lastAccelRate = null   // 이번 윈도우는 아직 판정 전 — 스킵되면 null(="none")로 CSV에 남는다.
-    lastMisopScore = null
-    if (isCalibrating) return
-    val calibrated = calibratedThresholdsJson ?: return
+  // 패턴 파악(캘리브레이션) 중에는 판정 자체를 건너뛴다(null 반환) — 그렇지 않으면 캘리브레이션 도중
+  // 세게 밟는 순간에 오조작 경고가 떠서 데이터 수집이 불편해진다.
+  // 캘리브레이션 전에는 기본 임계값으로 판정한다(2026-10-01 — 예전엔 "임계값 미설정 = 판정 안 함"이었다).
+  private fun judgeWindow(window: List<List<Double>>): JudgeResult? {
+    if (isCalibrating) return null
+    val det = detector ?: return null
 
     try {
       // 윈도우를 JSON 문자열로 직렬화해 전달 (Chaquopy ArrayList 변환 이슈 회피)
       val samplesJson = org.json.JSONArray()
       for (sample in window) samplesJson.put(org.json.JSONArray(sample))
 
-      val resultJson = Python.getInstance()
-        .getModule("judge")
-        .callAttr("judge_calibrated_json", samplesJson.toString(), calibrated)
-        .toString()
-      val result = JSONObject(resultJson)
+      val result = JSONObject(det.callAttr("step_json", samplesJson.toString()).toString())
       val misop = result.getBoolean("misop")
-      val trigger = result.getBoolean("trigger")
-      val score = result.getDouble("score")
-      val appliedLabel = result.getString("profile")   // 항상 "personalized" (judge_calibrated_json 고정값)
-      lastAccelRate = result.getDouble("rate")
-      lastMisopScore = score
-
-      // misop 결과는 lastLoggedMisop 에 남겨서 handleRawData 의 CSV 기록(같은 윈도우, 4Hz)이
-      // 방금 계산된 값을 그대로 쓴다.
+      val judged = JudgeResult(
+        score = result.getDouble("score"),
+        rate = result.getDouble("rate"),
+        armed = result.getBoolean("armed"),
+        consecutive = result.getInt("consecutive"),
+        fired = result.getBoolean("fired"),
+      )
+      if (consecutiveJudgeFailures > 0) {
+        consecutiveJudgeFailures = 0
+        refreshJudgeStatus()
+      }
 
       // 판정은 4Hz 로 나온다. 상태가 바뀌는 순간(정상<->오조작)은 항상 남기고,
       // 변화가 없으면 살아있다는 표시로 주기적 하트비트만 남긴다.
       val nowMs = System.currentTimeMillis()
       if (misop != lastLoggedMisop) {
-        Log.i(tag, "판정 변화: misop=$misop score=$score profile=$appliedLabel")
+        Log.i(tag, "판정 변화: misop=$misop score=${judged.score} armed=${judged.armed}")
         lastLoggedMisop = misop
         lastJudgeLogMs = nowMs
       } else if (nowMs - lastJudgeLogMs >= JUDGE_LOG_INTERVAL_MS) {
-        Log.d(tag, "판정: misop=$misop score=$score profile=$appliedLabel")
+        Log.d(tag, "판정: misop=$misop score=${judged.score} armed=${judged.armed}")
         lastJudgeLogMs = nowMs
       }
 
-      // trigger(엑셀 변화율 급증)가 한 번이라도 나오면 무장 — 이후에만 아래 지속시간
-      // 카운트가 진행된다. 트리거 없이 서서히 레벨만 올라간 경우는 애초에 카운트가
-      // 시작되지 않는다.
-      // ⚠️ 버그 수정(2026-07-18, 실측 데이터로 원인 확정): misopGapWindows는 misop=true일
-      // 때만 0으로 리셋되고, armed가 gap tolerance 초과로 해제될 때는 리셋되지 않았다.
-      // 그 결과 세션 중 한 번이라도 "무장→gap 초과→해제"가 발생하면, 그 뒤로는
-      // misopGapWindows가 문턱값 근처에 남은 채로 다음 재현이 시작돼서 새로 무장되자마자
-      // misop=false 윈도우 하나만 걸려도 즉시 재해제되는 문제가 있었다(연속 카운트가 1도
-      // 못 쌓임) — 짧게 훅 밟았다 뗀 경우 첫 윈도우의 score가 낮게 나오는 경우가 많아 실측
-      // recall이 세션마다 들쭉날쭉했던 진짜 원인. 트리거가 뜰 때마다(재무장 포함) gap
-      // 카운터도 같이 리셋해 새 무장 시도가 이전 무장의 잔여 상태에 영향받지 않게 한다.
-      if (trigger) {
-        armed = true
-        misopGapWindows = 0
-      }
-
-      // 지속시간 카운트: 무장된 상태에서 misop=true 가 여러 윈도우 연속으로 나와야
-      // 경고를 띄운다. 도중에 misop=false 가 잠깐(MISOP_GAP_TOLERANCE_WINDOWS 이내)
-      // 섞여도 카운트를 리셋하지 않고 봐준다 — 그 여유를 넘겨야 실제로 회복된 것으로 본다.
-      if (armed) {
-        if (misop) {
-          consecutiveMisopWindows++
-          misopGapWindows = 0
+      if (judged.fired) {
+        // 재현 실험 중엔 매 회차 전체화면 경고가 뜨면 실험이 끊긴다 — 실험 화면에만 알리고 CSV 에 남긴다.
+        val trialId = currentTrialId
+        if (trialId != null) {
+          Log.i(tag, "실험 중 경고 발동(표시 생략): trial=$trialId")
+          sendBroadcast(Intent(ACTION_TRIAL_FIRED).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_TRIAL_ID, trialId)
+          })
         } else {
-          misopGapWindows++
-          if (misopGapWindows > MISOP_GAP_TOLERANCE_WINDOWS) {
-            consecutiveMisopWindows = 0
-            armed = false // 회복됐으니 무장 해제 — 다음 경고는 새 트리거가 있어야 다시 뜬다
-            lastMisopShown = false // 실제로 회복됐을 때만 다음 오조작을 다시 경고할 수 있게 재무장
-          }
-        }
-
-        if (consecutiveMisopWindows >= MISOP_SUSTAIN_WINDOWS && !lastMisopShown) {
-          lastMisopShown = true
-          pedalErrorJustFired = true
           onPedalMisoperation()
         }
       }
+      return judged
     } catch (e: Exception) {
-      Log.e(tag, "judge 호출 실패: ${e.message}", e)
+      // 계속 실패하면 4Hz 로 쌓여 logcat 이 밀려 나간다 — 연속 실패의 첫 번만 남긴다(오류 진입은 "판정 상태" 로그로 보인다)
+      if (consecutiveJudgeFailures == 0) Log.e(tag, "judge 호출 실패: ${e.message}", e)
+      consecutiveJudgeFailures++
+      refreshJudgeStatus()
+      return null
     }
   }
 
   // 페달 오조작 감지 시 경고 트리거 (fullScreenIntent로 CriticalActivity 강제 실행)
   private fun onPedalMisoperation() {
     Log.w(tag, "[경고] 페달 오조작 감지")
-    playVoiceFile("PEDAL")
+    alerts.playVoice("PEDAL")
     updateNotification("주의: 페달 오조작 감지")
-    showCriticalNotification("위험! 페달 오조작!", "즉시 브레이크를 확인하세요!")
-
-    // fullScreenIntent는 화면이 꺼져있거나 잠겨있을 때만 자동 실행되고,
-    // 화면을 보고 있는 상태(포그라운드)에서는 배너 알림으로만 뜬다.
-    // 오조작은 화면을 보고 있는 상태에서도 무조건 전환돼야 하므로 직접 실행도 병행한다.
-    val forceIntent = Intent(this, CriticalActivity::class.java)
-    forceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    startActivity(forceIntent)
-  }
-
-  private fun playVoiceFile(type: String) {
-    // 저장된 성별 확인
-    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
-    val gender = prefs.getString("TTS_GENDER", "female") ?: "female"
-
-    // 상황과 성별에 맞는 MP3 파일 ID 찾기
-    var soundResId = 0
-
-    if (gender == "male") {
-      // 남성일 때 파일 매칭
-      soundResId = when(type) {
-        "PEDAL" -> R.raw.voice_pedal_male
-        "SD" -> R.raw.voice_sd_male
-        "ERROR" -> R.raw.voice_error_male
-        else -> 0
-      }
-    } else {
-      // 여성일 때 파일 매칭
-      soundResId = when(type) {
-        "PEDAL" -> R.raw.voice_pedal_female
-        "SD" -> R.raw.voice_sd_female
-        "ERROR" -> R.raw.voice_error_female
-        else -> 0
-      }
-    }
-
-    // 재생 (파일이 존재할 경우만)
-    if (soundResId != 0) {
-      try {
-        // MediaPlayer 생성 및 재생
-        val mediaPlayer = android.media.MediaPlayer.create(this, soundResId)
-        mediaPlayer.setOnCompletionListener {
-          it.release() // 재생 끝나면 메모리 청소
-        }
-        mediaPlayer.start()
-      } catch (e: Exception) {
-        Log.e(tag, "MP3 재생 실패: ${e.message}")
-      }
-    }
+    alerts.showCritical("위험! 페달 오조작!", "즉시 브레이크를 확인하세요!")   // 전체화면 경고(알림 + 직접 실행)
   }
 
   private fun startForegroundServiceNotification(content: String) {
-    val notification = createNotification(content)
+    val notification = alerts.ongoingNotification(content)
     if (Build.VERSION.SDK_INT >= 34) {
-      startForeground(1, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+      // location 타입은 위치 권한이 있을 때만 — 권한 없이 선언하면 Android 14+ 에서 SecurityException.
+      var type = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+      if (speedTracker.hasPermission()) type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+      startForeground(SafetyAlerts.ONGOING_ID, notification, type)
     } else {
-      startForeground(1, notification)
+      startForeground(SafetyAlerts.ONGOING_ID, notification)
     }
   }
 
-  private fun updateNotification(content: String) {
-    val manager = getSystemService(NotificationManager::class.java)
-    manager.notify(1, createNotification(content))
-  }
-
-  private fun createNotification(content: String): Notification {
-    return NotificationCompat.Builder(this, channelId)
-      .setContentTitle("PeOb")
-      .setContentText(content)
-      .setSmallIcon(android.R.drawable.ic_dialog_info)
-      .setContentIntent(getPendingIntent())
-      .setOngoing(true)
-      .build()
-  }
-
-  private fun createNotificationChannel() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      // IMPORTANCE_LOW -> IMPORTANCE_HIGH 헤드업 알림 필수 조건!
-      val serviceChannel = NotificationChannel(
-        channelId,
-        "PeOb Safety Channel",
-        NotificationManager.IMPORTANCE_HIGH
-      )
-
-      // 알림 올 때 진동 Feedback
-      serviceChannel.enableVibration(true)
-      serviceChannel.description = "안전 장비의 긴급 경고를 알립니다."
-
-      getSystemService(NotificationManager::class.java).createNotificationChannel(serviceChannel)
-    }
-  }
+  // 상단 고정 알림 문구 교체 — BLE 연결 콜백(onConnectionStateChange)의 호출부를 건드리지 않으려고 이름을 유지한다
+  private fun updateNotification(content: String) = alerts.updateOngoing(content)
 
   @SuppressLint("MissingPermission")
   private fun disconnectGatt() {
@@ -963,6 +1059,26 @@ class BleService : Service() {
   private fun saveStatus(statusMsg: String) {
     val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
     prefs.edit().putString("CONNECTION_STATUS", statusMsg).apply()
+  }
+
+  // 상태가 실제로 바뀔 때만 방송한다. BLE 콜백 스레드에서도 불린다(비교와 교체는 updateState 잠금 안에서 한 번에).
+  private fun setMonitorState(next: MonitorState) {
+    val before = updateState { it.copy(monitor = next) }
+    if (before.monitor == next) return
+    Log.i(tag, "감시 상태: $next")
+    updatePedalEdgeOverlay()
+    sendBroadcastToActivity(ACTION_MONITOR_STATE)
+  }
+
+  // 감시 중이고 설정이 켜져 있고 경고 화면이 없을 때만 테두리 창을 붙인다. 떼는 경우엔 트래커도 비워,
+  // 다시 붙었을 때 첫 밟음이 "전환"으로 잡히게 한다.
+  private fun updatePedalEdgeOverlay() {
+    if (pedalEdgeEnabled && !criticalShowing && monitorState == MonitorState.MONITORING) {
+      pedalEdgeOverlay.attach()
+    } else {
+      pedalEdgeOverlay.detach()
+      pedalStateTracker.reset()
+    }
   }
 
   private fun sendBroadcastToActivity(action: String) {
@@ -1019,67 +1135,12 @@ class BleService : Service() {
   private fun handleUuidMismatch() {
     Log.e(tag, "목표 서비스/특성을 찾을 수 없음 (UUID 확인 필요)")
     saveStatus("경고: 인증 코드가 다릅니다. (UUID 불일치)")
+    setMonitorState(MonitorState.WRONG_DEVICE)
     val intent = Intent("ACTION_UUID_MISMATCH")
     intent.setPackage(packageName)
     applicationContext.sendBroadcast(intent)
     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
       stopSelf()
     }, 500)
-  }
-
-  private fun showHeadsUpNotification(title: String, content: String) {
-    val manager = getSystemService(NotificationManager::class.java)
-
-    val notification = NotificationCompat.Builder(this, channelId)
-      .setContentTitle(title)
-      .setContentText(content)
-      .setSmallIcon(android.R.drawable.stat_sys_warning) // 경고 아이콘
-      .setPriority(NotificationCompat.PRIORITY_HIGH) // 중요도 최상
-      .setDefaults(Notification.DEFAULT_ALL) // 소리/진동 기본값 사용
-      .setAutoCancel(true) // 터치하면 사라짐
-      .setContentIntent(getPendingIntent())
-      .build()
-
-    // 중요: ID를 1번(서비스용)과 다르게 999번(경고용)으로 줍니다.
-    manager.notify(999, notification)
-  }
-
-  // CriticalActivity를 깨우는 비상 알림 함수 (fullScreenIntent로 강제 전체화면 전환)
-  private fun showCriticalNotification(title: String, content: String) {
-    val manager = getSystemService(NotificationManager::class.java)
-
-    val fullScreenIntent = Intent(this, CriticalActivity::class.java)
-    fullScreenIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-
-    val fullScreenPendingIntent = PendingIntent.getActivity(
-      this,
-      999,
-      fullScreenIntent,
-      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
-
-    val builder = NotificationCompat.Builder(this, channelId)
-      .setSmallIcon(android.R.drawable.stat_sys_warning)
-      .setContentTitle(title)
-      .setContentText(content)
-      .setPriority(NotificationCompat.PRIORITY_HIGH)
-      .setCategory(NotificationCompat.CATEGORY_ALARM)
-      .setFullScreenIntent(fullScreenPendingIntent, true)
-      .setAutoCancel(true)
-      .build()
-
-    manager.notify(888, builder)
-  }
-
-  private fun getPendingIntent(): PendingIntent? {
-    val intent = Intent(this, MainActivity::class.java)
-    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-
-    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-      PendingIntent.FLAG_IMMUTABLE
-    } else {
-      PendingIntent.FLAG_UPDATE_CURRENT
-    }
-    return PendingIntent.getActivity(this,0, intent, flags)
   }
 }

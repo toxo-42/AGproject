@@ -4,9 +4,11 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.ColorStateList
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
@@ -16,9 +18,9 @@ import com.google.android.material.card.MaterialCardView
 import com.google.android.material.button.MaterialButton
 import android.content.Context
 import androidx.core.content.ContextCompat
-import com.bumptech.glide.Glide
-import com.bumptech.glide.request.RequestOptions
-import jp.wasabeef.glide.transformations.BlurTransformation
+import androidx.core.view.isVisible
+import com.google.android.material.color.MaterialColors
+import com.google.android.material.R as MaterialR
 
 
 class MainActivity : AppCompatActivity() {
@@ -29,14 +31,20 @@ class MainActivity : AppCompatActivity() {
   private lateinit var tvTargetAddress: TextView
   private lateinit var btnGoScan: MaterialButton
   private lateinit var btnGoManager: MaterialButton
+  private lateinit var btnStartMonitor: MaterialButton
+  private lateinit var btnStopMonitor: MaterialButton
+  private lateinit var layoutStatusChip: View
+  private lateinit var viewStatusDot: View
+  private lateinit var tvStatus: TextView
+  private lateinit var dividerCalibration: View
+  private lateinit var layoutCalibration: View
+  private lateinit var ivCalibration: ImageView
+  private lateinit var tvCalibration: TextView
 
-
-  private var isRunning = false
   private var targetAddress: String? = null
   private var targetName: String? = null
-
-  // 0: 대기, 1: 정상, 2: 에러(UUID 다름)
-  private var connectionStatus= 0
+  private var isCalibrated = false
+  private var habitProgress: HabitProgress? = null
 
   // 캘리브레이션 온보딩 팝업이 이미 떠 있는 동안 중복으로 안 뜨게 막는 플래그.
   private var isCalibrationPopupShowing = false
@@ -45,15 +53,14 @@ class MainActivity : AppCompatActivity() {
   private val statusReceiver = object : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
       when (intent?.action) {
-        "ACTION_UUID_MATCHED" -> {
-          connectionStatus = 1 // 정상
-          updateUI()
-          maybeShowCalibrationOnboarding()
-        }
-        "ACTION_UUID_MISMATCH" -> {
-          connectionStatus = 2 // 에러 (빨간불)
+        // 감시·판정 상태가 바뀔 때마다 BleService가 보냄 — 실제 값은 BleService.state 에서 읽는다
+        BleService.ACTION_MONITOR_STATE -> updateUI()
+        // 습관 학습 n/100 실시간 갱신 — 감시 중이면 서비스 메모리의 최신값, 꺼졌으면 prefs 저장본
+        BleService.ACTION_LEARNING_PROGRESS -> {
+          loadSavedData()
           updateUI()
         }
+        "ACTION_UUID_MATCHED" -> maybeShowCalibrationOnboarding()
         "ACTION_MODULE_ERROR" ->{
          showErrorPopup()// 팝업 띄우는 함수 실행
         }
@@ -68,20 +75,21 @@ class MainActivity : AppCompatActivity() {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
 
-    // 배경 블러처리
-    val ivBackground = findViewById<ImageView>(R.id.ivBackground)
-
-    Glide.with(this)
-      .load(R.drawable.bg_main_capture)// 캡처해서 넣은 이미지 파일명
-      .apply(RequestOptions.bitmapTransform(BlurTransformation(25, 3)))
-      .into(ivBackground)
-
     // UI 연결 (activity_main.xml의 ID와 연결)
     cardCurrentTarget = findViewById(R.id.cardCurrentTarget)
     tvTargetName = findViewById(R.id.tvTargetName)
     tvTargetAddress = findViewById(R.id.tvTargetAddress)
     btnGoScan = findViewById(R.id.btnGoScan)
     btnGoManager = findViewById(R.id.btnGoManager)
+    btnStartMonitor = findViewById(R.id.btnStartMonitor)
+    btnStopMonitor = findViewById(R.id.btnStopMonitor)
+    layoutStatusChip = findViewById(R.id.layoutStatusChip)
+    viewStatusDot = findViewById(R.id.viewStatusDot)
+    tvStatus = findViewById(R.id.tvStatus)
+    dividerCalibration = findViewById(R.id.dividerCalibration)
+    layoutCalibration = findViewById(R.id.layoutCalibration)
+    ivCalibration = findViewById(R.id.ivCalibration)
+    tvCalibration = findViewById(R.id.tvCalibration)
 
     // 앱 켜자마자 권한 확인
     checkPermissions()
@@ -103,9 +111,15 @@ class MainActivity : AppCompatActivity() {
       startActivity(intent)
     }
 
-    // '중앙 카드'를 누르면 시스템 시작/정지 (구 btnToggle 기능)
-    cardCurrentTarget.setOnClickListener {
-      toggleSystem()
+    btnStartMonitor.setOnClickListener { startSystem() }
+    btnStopMonitor.setOnClickListener {
+      stopSystem()
+      Toast.makeText(this, "감시 시스템을 종료합니다.", Toast.LENGTH_SHORT).show()
+    }
+
+    // 패턴 파악 전이면 눌러서 바로 데이터 수집(캘리브레이션) 화면으로
+    layoutCalibration.setOnClickListener {
+      if (!isCalibrated) startActivity(Intent(this, DataCollectActivity::class.java))
     }
 
   }
@@ -116,8 +130,9 @@ class MainActivity : AppCompatActivity() {
 
     // 라디오 켜기 (방송 수신 등록)
     val filter = android.content.IntentFilter().apply {
+      addAction(BleService.ACTION_MONITOR_STATE)
+      addAction(BleService.ACTION_LEARNING_PROGRESS)
       addAction("ACTION_UUID_MATCHED")
-      addAction("ACTION_UUID_MISMATCH")
       addAction("ACTION_MODULE_ERROR")
       addAction("ACTION_SD_CARD_WARNING")
     }
@@ -140,80 +155,88 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
-  // --- 시스템 제어 로직 ---
-  private fun toggleSystem() {
-    if (isRunning) {
-      // STOP 기능
-      stopSystem()
-      isRunning = false
-      Toast.makeText(this, "감시 시스템을 종료합니다.", Toast.LENGTH_SHORT).show()
-    } else {
-      // START 기능
-      if (targetAddress == null) {
-        Toast.makeText(this, "먼저 [기기 검색]을 눌러 기기를 등록해주세요!", Toast.LENGTH_LONG).show()
-        return
-      }
-      startSystem()
-      isRunning = true
-    }
-    updateUI() // 화면 색상 변경
-  }
-
-  @SuppressLint("SetTextI18n")
+  // --- 화면 갱신 ---
+  // 감시·판정 상태는 BleService.state(단일 출처)에서 한 번 읽고, 기기·캘리브레이션 정보는 prefs에서 읽어 그린다.
   private fun updateUI() {
-    // 1. 기기가 아예 등록 안 된 상태
-    if (targetAddress == null) {
-      tvTargetName.text = "등록된 기기 없음"
-      tvTargetAddress.text = "기기 검색 버튼을 눌러주세요"
-      tvTargetName.setTextColor(getColor(R.color.text_gray))
-      tvTargetAddress.setTextColor(getColor(R.color.text_hint))
+    val service = BleService.state
+    val state = service.monitor
+    val hasDevice = targetAddress != null
 
-      cardCurrentTarget.setCardBackgroundColor(getColor(R.color.bg_card))
-      cardCurrentTarget.setStrokeWidth(0) // 테두리 없음
-    }
-    // 2. 기기는 등록된 상태
-    else {
-      tvTargetName.text = targetName ?: "Unknown Device"
-      tvTargetAddress.text = targetAddress
-
-      if (isRunning) {
-        // [수정] connectionStatus에 따라 색깔놀이
-        when (connectionStatus) {
-          1 -> { // 정상 연결 (파란색)
-            tvTargetAddress.text = "실시간 감시 중..."
-            tvTargetName.setTextColor(getColor(R.color.accent_blue))
-            cardCurrentTarget.setStrokeColor(getColor(R.color.accent_blue))
-            cardCurrentTarget.setStrokeWidth(4) // 굵게
-          }
-          2 -> { // UUID 불일치 (빨간색)
-            tvTargetAddress.text = "잘못된 기기입니다 (UUID 불일치)"
-            tvTargetAddress.setTextColor(getColor(R.color.red_error)) // 글자도 빨갛게
-            tvTargetName.setTextColor(getColor(R.color.red_error))
-            cardCurrentTarget.setStrokeColor(getColor(R.color.red_error)) // 테두리 빨갛게!
-            cardCurrentTarget.setStrokeWidth(8) // 더 굵게 경고!
-          }
-          else -> { // 연결 시도 중... (0번 상태)
-            tvTargetAddress.text = "연결 시도 중..."
-            tvTargetName.setTextColor(getColor(R.color.text_white)) // 연결 중엔 흰색 유지
-            cardCurrentTarget.setStrokeColor(getColor(R.color.text_gray))
-            cardCurrentTarget.setStrokeWidth(2)
-          }
-        }
-      } else {
-        // 정지 상태 (원상복구)
-        connectionStatus = 0 // 상태 초기화
-        tvTargetName.setTextColor(getColor(R.color.text_white))
-        tvTargetAddress.setTextColor(getColor(R.color.text_hint))
-        cardCurrentTarget.setStrokeWidth(0)
+    // 1. 상태 칩 (점 색 + 글자)
+    val (statusText, dotAttr) = when {
+      !hasDevice -> R.string.monitor_no_device to MaterialR.attr.colorOutline
+      // 연결 상태와 무관하게 판정이 꺼졌으면 보호받지 못하는 상태 — 가장 먼저 드러낸다
+      state.isActive && service.judge == JudgeStatus.FAILED -> R.string.monitor_judge_failed to MaterialR.attr.colorError
+      else -> when (state) {
+        MonitorState.STOPPED -> R.string.monitor_stopped to MaterialR.attr.colorOutline
+        MonitorState.CONNECTING -> R.string.monitor_connecting to MaterialR.attr.colorTertiary
+        MonitorState.MONITORING -> R.string.monitor_monitoring to MaterialR.attr.colorPrimary
+        MonitorState.RECONNECTING -> R.string.monitor_reconnecting to MaterialR.attr.colorTertiary
+        MonitorState.WRONG_DEVICE -> R.string.monitor_wrong_device to MaterialR.attr.colorError
       }
     }
+    val dotColor = MaterialColors.getColor(viewStatusDot, dotAttr)
+    tvStatus.setText(statusText)
+    viewStatusDot.backgroundTintList = ColorStateList.valueOf(dotColor)
+
+    // 2. 기기 이름/주소 + 카드 테두리 (켜져 있을 때만 상태 색 테두리)
+    val onSurfaceVariant = MaterialColors.getColor(tvTargetName, MaterialR.attr.colorOnSurfaceVariant)
+    val outline = MaterialColors.getColor(tvTargetAddress, MaterialR.attr.colorOutline)
+    val error = MaterialColors.getColor(tvTargetAddress, MaterialR.attr.colorError)
+    if (!hasDevice) {
+      tvTargetName.setText(R.string.no_device_registered)
+      tvTargetName.setTextColor(onSurfaceVariant)
+      tvTargetAddress.setText(R.string.register_prompt)
+      tvTargetAddress.setTextColor(outline)
+    } else {
+      tvTargetName.text = targetName ?: "Unknown Device"
+      tvTargetName.setTextColor(MaterialColors.getColor(tvTargetName, MaterialR.attr.colorOnSurface))
+      if (state == MonitorState.WRONG_DEVICE) {
+        tvTargetAddress.setText(R.string.msg_wrong_device)
+        tvTargetAddress.setTextColor(error)
+      } else {
+        tvTargetAddress.text = targetAddress
+        tvTargetAddress.setTextColor(outline)
+      }
+    }
+    val showStroke = hasDevice && (state.isActive || state == MonitorState.WRONG_DEVICE)
+    cardCurrentTarget.strokeColor = dotColor
+    cardCurrentTarget.strokeWidth = if (showStroke) (2 * resources.displayMetrics.density).toInt() else 0
+
+    // 3. 캘리브레이션 줄 — 개인화 전엔 기본값으로 감지 중이라는 것과 습관 학습 진행도를 보인다
+    dividerCalibration.isVisible = hasDevice
+    layoutCalibration.isVisible = hasDevice
+    layoutCalibration.isClickable = !isCalibrated
+    if (isCalibrated) {
+      ivCalibration.setImageResource(R.drawable.ic_check_circle)
+      ivCalibration.imageTintList = ColorStateList.valueOf(MaterialColors.getColor(ivCalibration, MaterialR.attr.colorPrimary))
+      tvCalibration.setText(if (habitProgress?.ready == true) R.string.calibration_habit_ready else R.string.calibration_done)
+      tvCalibration.setTextColor(onSurfaceVariant)
+    } else {
+      val tertiary = MaterialColors.getColor(ivCalibration, MaterialR.attr.colorTertiary)
+      ivCalibration.setImageResource(R.drawable.ic_warning)
+      ivCalibration.imageTintList = ColorStateList.valueOf(tertiary)
+      val progress = habitProgress
+      tvCalibration.text = if (progress != null) getString(R.string.calibration_needed_learning, progress.events, progress.gate)
+        else getString(R.string.calibration_needed)
+      tvCalibration.setTextColor(tertiary)
+    }
+
+    // 4. 시작/중지 버튼 — 켜져 있으면 중지만, 꺼져 있으면 시작만 보인다. 기기 없으면 시작 불가
+    btnStartMonitor.isVisible = !state.isActive
+    btnStopMonitor.isVisible = state.isActive
+    btnStartMonitor.isEnabled = hasDevice
   }
+
   // --- 데이터 및 서비스 관리 ---
 
   private fun loadSavedData() {
     val prefs: SharedPreferences = getSharedPreferences("AgPrefs", MODE_PRIVATE)
     targetAddress = prefs.getString("TARGET_ADDRESS", null)
     targetName = prefs.getString("TARGET_NAME", "AG_Test_Module")
+    isCalibrated = CalibrationPrefs.isPersonalized(prefs)
+    habitProgress = CalibrationPrefs.parseHabitProgress(BleService.state.liveHabitStateJson)
+      ?: CalibrationPrefs.habitProgress(prefs)
   }
 
   private fun startSystem() {
@@ -279,14 +302,13 @@ class MainActivity : AppCompatActivity() {
     dialog.show()
   }
 
-  // 연결 성공 시, 아직 캘리브레이션한 적이 없으면 "패턴 파악" 화면으로 유도하는 팝업.
-  // 캘리브레이션 전엔 오조작 감지가 아예 동작하지 않으므로(BleService.judgeWindow 참고)
-  // 사용자가 이걸 모르고 지나치지 않게 강제로 안내한다.
+  // 연결 성공 시, 브레이크 영점 조절을 한 적이 없고 아직 개인화 전이면 영점 조절(그래프 화면)로 안내하는 팝업.
+  // 실차 부착 시 예압이 있으면 영점 조절 없인 brake_low 가 0.10 에 머물러 오조작 경고가 뜰 수 없다(§진행상황 §6).
+  // 엑셀 습관은 주행 중 자동 학습되므로 여기선 권하지 않는다.
   private fun maybeShowCalibrationOnboarding() {
     if (isCalibrationPopupShowing || isFinishing || isDestroyed) return
-    val calibrated = getSharedPreferences("AgPrefs", MODE_PRIVATE)
-      .getString(BleService.PREF_CALIBRATED_THRESHOLDS, null)
-    if (calibrated != null) return
+    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    if (CalibrationPrefs.userCalibration(prefs) != null || CalibrationPrefs.isPersonalized(prefs)) return
 
     isCalibrationPopupShowing = true
     val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
@@ -295,6 +317,7 @@ class MainActivity : AppCompatActivity() {
       .setPositiveButton(R.string.btn_calibration_onboarding_start) { _, _ ->
         startActivity(Intent(this, DataCollectActivity::class.java))
       }
+      .setNegativeButton(R.string.btn_calibration_onboarding_later, null)
       .setOnDismissListener { isCalibrationPopupShowing = false }
       .create()
     dialog.show()

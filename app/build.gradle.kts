@@ -42,10 +42,16 @@ android {
   }
 }
 
-// Chaquopy 설정: Python 코드는 기본 경로 src/main/python 에서 찾는다.
+// Chaquopy 설정: Python backend 원본은 저장소 최상위 backend/ 의 peob 패키지 하나뿐이다
+// (2026-09-25, app/src/main/python 복사본 폐지). Kotlin 에서는 getModule("peob.judge") 처럼 부른다.
 chaquopy {
   defaultConfig {
     version = "3.12"
+  }
+  sourceSets {
+    getByName("main") {
+      srcDir("../backend/src")
+    }
   }
 }
 
@@ -56,11 +62,6 @@ dependencies {
   implementation("com.google.android.material:material:1.10.0")
   implementation("androidx.activity:activity:1.8.0")
   implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-  // Glide Transformations(블러효과 확장)
-  implementation ("jp.wasabeef:glide-transformations:4.3.0")
-  // Glide(이미지 로딩)
-  implementation("com.github.bumptech.glide:glide:4.16.0")
-  annotationProcessor("com.github.bumptech.glide:compiler:4.16.0")
   testImplementation("junit:junit:4.13.2")
   androidTestImplementation("androidx.test.ext:junit:1.1.5")
   androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")

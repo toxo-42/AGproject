@@ -2,7 +2,9 @@ package com.example.agproject
 
 import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.widget.Button
 import android.widget.EditText
@@ -15,6 +17,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.materialswitch.MaterialSwitch
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -59,10 +62,15 @@ class DeviceManagerActivity : AppCompatActivity() {
       true
     }
 
-    // 3. 설정 버튼 연결
+    // 3. 설정 버튼 연결 (톱니 아이콘 → 설정 다이얼로그 → 음성 안내 설정 등)
     val btnOpenSettings = findViewById<ImageButton>(R.id.btnOpenSettings)
     btnOpenSettings.setOnClickListener {
-      showTTSSettingsDialog()
+      showSettingsDialog()
+    }
+    // 길게 누르면 개발자 설정(일반 사용자에겐 숨김) — 개발·시연용 스위치를 여기에 모은다
+    btnOpenSettings.setOnLongClickListener {
+      showDevSettingsDialog()
+      true
     }
 
     // 로깅 데이터 추출(Phase E) — 세션 선택 후 CSV를 공유 시트로 내보낸다.
@@ -106,7 +114,16 @@ class DeviceManagerActivity : AppCompatActivity() {
     // 연결 해제 버튼 이벤트
     btnDisconnect.setOnClickListener {
       stopService(Intent(this, BleService::class.java))
-      prefs.edit().clear().apply()
+      // clear()로 전부 지우면 TTS 성별 등 기기와 무관한 설정까지 날아간다(2026-09-24 버그 수정).
+      // 기기 정보 + 캘리브레이션만 지운다 — 캘리브레이션은 센서 모듈 특성에도 묶여 있어
+      // 모듈이 바뀌면 무조건 다시 해야 한다(사용자 결정).
+      prefs.edit()
+        .remove("TARGET_ADDRESS")
+        .remove("TARGET_NAME")
+        .remove("CONNECTION_STATUS")
+        .remove(BleService.PREF_CALIBRATION_START_MS)
+        .let { CalibrationPrefs.clearAllCalibrations(it) }
+        .apply()
       Toast.makeText(this, "기기 등록이 해제되었습니다.", Toast.LENGTH_SHORT).show()
       finish()
     }
@@ -116,6 +133,61 @@ class DeviceManagerActivity : AppCompatActivity() {
       Toast.makeText(this, "UUID 확인용 토스트", Toast.LENGTH_SHORT).show()
       true
     }
+  }
+
+  // 설정 다이얼로그 — 설정 항목이 늘면 dialog_settings.xml 에 한 줄씩 추가한다.
+  private fun showSettingsDialog() {
+    val dialogView = layoutInflater.inflate(R.layout.dialog_settings, null)
+    val dialog = AlertDialog.Builder(this).setView(dialogView).create()
+    dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    val swPedalEdge = dialogView.findViewById<MaterialSwitch>(R.id.swPedalEdge)
+    swPedalEdge.isChecked = prefs.getBoolean(BleService.PREF_PEDAL_EDGE_ENABLED, true)
+    swPedalEdge.setOnCheckedChangeListener { _, checked ->
+      prefs.edit().putBoolean(BleService.PREF_PEDAL_EDGE_ENABLED, checked).apply()
+      if (BleService.state.monitor.isActive) {
+        startService(Intent(this, BleService::class.java).apply { action = BleService.ACTION_SET_PEDAL_EDGE })
+      }
+      // 켰는데 오버레이 권한이 없으면 테두리가 안 보인다 — 권한 화면으로 안내
+      if (checked && !Settings.canDrawOverlays(this)) {
+        Toast.makeText(this, R.string.msg_overlay_permission_needed, Toast.LENGTH_LONG).show()
+        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+      }
+    }
+
+    dialogView.findViewById<Button>(R.id.btnOpenDrivingStyle).setOnClickListener {
+      dialog.dismiss()
+      startActivity(Intent(this, DrivingStyleActivity::class.java))
+    }
+    dialogView.findViewById<Button>(R.id.btnOpenTtsSettings).setOnClickListener {
+      dialog.dismiss()
+      showTTSSettingsDialog()
+    }
+    dialogView.findViewById<Button>(R.id.btnCloseSettings).setOnClickListener { dialog.dismiss() }
+
+    dialog.show()
+  }
+
+  // 개발자 설정 다이얼로그 — 개발·시연용 항목. 항목이 늘면 dialog_dev_settings.xml 에 한 줄씩 추가한다.
+  private fun showDevSettingsDialog() {
+    val dialogView = layoutInflater.inflate(R.layout.dialog_dev_settings, null)
+    val dialog = AlertDialog.Builder(this).setView(dialogView).create()
+    dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    val swStyleDemo = dialogView.findViewById<MaterialSwitch>(R.id.swStyleDemo)
+    swStyleDemo.isChecked = CalibrationPrefs.isStyleDemo(prefs)
+    swStyleDemo.setOnCheckedChangeListener { _, checked ->
+      CalibrationPrefs.setStyleDemo(prefs, checked)
+      // 감시 중이면 진단 보고서(최소 데이터 기준)를 바로 다시 계산하게 알린다
+      if (BleService.state.monitor.isActive) {
+        startService(Intent(this, BleService::class.java).apply { action = BleService.ACTION_PUBLISH_PROGRESS })
+      }
+    }
+
+    dialogView.findViewById<Button>(R.id.btnCloseDevSettings).setOnClickListener { dialog.dismiss() }
+    dialog.show()
   }
 
   // 성별 선택 기능 추가된 팝업 함수

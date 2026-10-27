@@ -1,9 +1,232 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.AGproject" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+    <!-- Base application theme. 운전 중 사용 → 다크 전용으로 고정 (값은 colors.xml의 md_theme_*) -->
+    <style name="Base.Theme.AGproject" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/md_theme_primary</item>
+        <item name="colorOnPrimary">@color/md_theme_onPrimary</item>
+        <item name="colorPrimaryContainer">@color/md_theme_primaryContainer</item>
+        <item name="colorOnPrimaryContainer">@color/md_theme_onPrimaryContainer</item>
+        <item name="colorPrimaryInverse">@color/md_theme_inversePrimary</item>
+
+        <item name="colorSecondary">@color/md_theme_secondary</item>
+        <item name="colorOnSecondary">@color/md_theme_onSecondary</item>
+        <item name="colorSecondaryContainer">@color/md_theme_secondaryContainer</item>
+        <item name="colorOnSecondaryContainer">@color/md_theme_onSecondaryContainer</item>
+
+        <item name="colorTertiary">@color/md_theme_tertiary</item>
+        <item name="colorOnTertiary">@color/md_theme_onTertiary</item>
+        <item name="colorTertiaryContainer">@color/md_theme_tertiaryContainer</item>
+        <item name="colorOnTertiaryContainer">@color/md_theme_onTertiaryContainer</item>
+
+        <item name="colorError">@color/md_theme_error</item>
+        <item name="colorOnError">@color/md_theme_onError</item>
+        <item name="colorErrorContainer">@color/md_theme_errorContainer</item>
+        <item name="colorOnErrorContainer">@color/md_theme_onErrorContainer</item>
+
+        <item name="android:colorBackground">@color/md_theme_surface</item>
+        <item name="colorOnBackground">@color/md_theme_onSurface</item>
+        <item name="colorSurface">@color/md_theme_surface</item>
+        <item name="colorOnSurface">@color/md_theme_onSurface</item>
+        <item name="colorSurfaceVariant">@color/md_theme_surfaceVariant</item>
+        <item name="colorOnSurfaceVariant">@color/md_theme_onSurfaceVariant</item>
+        <item name="colorSurfaceContainerLowest">@color/md_theme_surfaceContainerLowest</item>
+        <item name="colorSurfaceContainerLow">@color/md_theme_surfaceContainerLow</item>
+        <item name="colorSurfaceContainer">@color/md_theme_surfaceContainer</item>
+        <item name="colorSurfaceContainerHigh">@color/md_theme_surfaceContainerHigh</item>
+        <item name="colorSurfaceContainerHighest">@color/md_theme_surfaceContainerHighest</item>
+        <item name="colorSurfaceInverse">@color/md_theme_inverseSurface</item>
+        <item name="colorOnSurfaceInverse">@color/md_theme_inverseOnSurface</item>
+
+        <item name="colorOutline">@color/md_theme_outline</item>
+        <item name="colorOutlineVariant">@color/md_theme_outlineVariant</item>
+
+        <!-- 글꼴: Pretendard. M3 type scale 각 단계를 아래 TextAppearance.PeOb.* 로 교체 -->
+        <item name="android:fontFamily">@font/pretendard</item>
+        <item name="fontFamily">@font/pretendard</item>
+        <item name="textAppearanceDisplayLarge">@style/TextAppearance.PeOb.DisplayLarge</item>
+        <item name="textAppearanceDisplayMedium">@style/TextAppearance.PeOb.DisplayMedium</item>
+        <item name="textAppearanceDisplaySmall">@style/TextAppearance.PeOb.DisplaySmall</item>
+        <item name="textAppearanceHeadlineLarge">@style/TextAppearance.PeOb.HeadlineLarge</item>
+        <item name="textAppearanceHeadlineMedium">@style/TextAppearance.PeOb.HeadlineMedium</item>
+        <item name="textAppearanceHeadlineSmall">@style/TextAppearance.PeOb.HeadlineSmall</item>
+        <item name="textAppearanceTitleLarge">@style/TextAppearance.PeOb.TitleLarge</item>
+        <item name="textAppearanceBodyLarge">@style/TextAppearance.PeOb.BodyLarge</item>
+        <item name="textAppearanceBodyMedium">@style/TextAppearance.PeOb.BodyMedium</item>
+        <item name="textAppearanceBodySmall">@style/TextAppearance.PeOb.BodySmall</item>
+        <item name="textAppearanceTitleMedium">@style/TextAppearance.PeOb.TitleMedium</item>
+        <item name="textAppearanceTitleSmall">@style/TextAppearance.PeOb.TitleSmall</item>
+        <item name="textAppearanceLabelLarge">@style/TextAppearance.PeOb.LabelLarge</item>
+        <item name="textAppearanceLabelMedium">@style/TextAppearance.PeOb.LabelMedium</item>
+        <item name="textAppearanceLabelSmall">@style/TextAppearance.PeOb.LabelSmall</item>
+
+        <!-- 컴포넌트 기본 스타일 (아래 Widget.PeOb.*) -->
+        <item name="materialButtonStyle">@style/Widget.PeOb.Button</item>
+        <item name="materialCardViewStyle">@style/Widget.PeOb.Card</item>
+        <item name="radioButtonStyle">@style/Widget.Material3.CompoundButton.RadioButton</item>
+        <item name="shapeAppearanceSmallComponent">@style/ShapeAppearance.PeOb.Small</item>
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.PeOb.Medium</item>
+        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.PeOb.Large</item>
+
+        <!-- 상태바/내비게이션바도 배경과 같은 색으로 -->
+        <item name="android:statusBarColor">@color/md_theme_surface</item>
+        <item name="android:navigationBarColor">@color/md_theme_surface</item>
     </style>
 
     <style name="Theme.AGproject" parent="Base.Theme.AGproject"/>
+    <!-- ===== 글꼴 (Pretendard) — M3 type scale의 크기/행간은 그대로 두고 글꼴만 교체 ===== -->
+    <style name="TextAppearance.PeOb.DisplayLarge" parent="TextAppearance.Material3.DisplayLarge">
+        <item name="android:fontFamily">@font/pretendard</item>
+        <item name="fontFamily">@font/pretendard</item>
+    </style>
+    <style name="TextAppearance.PeOb.DisplayMedium" parent="TextAppearance.Material3.DisplayMedium">
+        <item name="android:fontFamily">@font/pretendard</item>
+        <item name="fontFamily">@font/pretendard</item>
+    </style>
+    <style name="TextAppearance.PeOb.DisplaySmall" parent="TextAppearance.Material3.DisplaySmall">
+        <item name="android:fontFamily">@font/pretendard</item>
+        <item name="fontFamily">@font/pretendard</item>
+    </style>
+    <style name="TextAppearance.PeOb.HeadlineLarge" parent="TextAppearance.Material3.HeadlineLarge">
+        <item name="android:fontFamily">@font/pretendard</item>
+        <item name="fontFamily">@font/pretendard</item>
+    </style>
+    <style name="TextAppearance.PeOb.HeadlineMedium" parent="TextAppearance.Material3.HeadlineMedium">
+        <item name="android:fontFamily">@font/pretendard</item>
+        <item name="fontFamily">@font/pretendard</item>
+    </style>
+    <style name="TextAppearance.PeOb.HeadlineSmall" parent="TextAppearance.Material3.HeadlineSmall">
+        <item name="android:fontFamily">@font/pretendard</item>
+        <item name="fontFamily">@font/pretendard</item>
+    </style>
+    <style name="TextAppearance.PeOb.TitleLarge" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:fontFamily">@font/pretendard</item>
+        <item name="fontFamily">@font/pretendard</item>
+    </style>
+    <style name="TextAppearance.PeOb.BodyLarge" parent="TextAppearance.Material3.BodyLarge">
+        <item name="android:fontFamily">@font/pretendard</item>
+        <item name="fontFamily">@font/pretendard</item>
+    </style>
+    <style name="TextAppearance.PeOb.BodyMedium" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:fontFamily">@font/pretendard</item>
+        <item name="fontFamily">@font/pretendard</item>
+    </style>
+    <style name="TextAppearance.PeOb.BodySmall" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:fontFamily">@font/pretendard</item>
+        <item name="fontFamily">@font/pretendard</item>
+    </style>
+    <style name="TextAppearance.PeOb.TitleMedium" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:fontFamily">@font/pretendard_medium_family</item>
+        <item name="fontFamily">@font/pretendard_medium_family</item>
+    </style>
+    <style name="TextAppearance.PeOb.TitleSmall" parent="TextAppearance.Material3.TitleSmall">
+        <item name="android:fontFamily">@font/pretendard_medium_family</item>
+        <item name="fontFamily">@font/pretendard_medium_family</item>
+    </style>
+    <style name="TextAppearance.PeOb.LabelLarge" parent="TextAppearance.Material3.LabelLarge">
+        <item name="android:fontFamily">@font/pretendard_medium_family</item>
+        <item name="fontFamily">@font/pretendard_medium_family</item>
+    </style>
+    <style name="TextAppearance.PeOb.LabelMedium" parent="TextAppearance.Material3.LabelMedium">
+        <item name="android:fontFamily">@font/pretendard_medium_family</item>
+        <item name="fontFamily">@font/pretendard_medium_family</item>
+    </style>
+    <style name="TextAppearance.PeOb.LabelSmall" parent="TextAppearance.Material3.LabelSmall">
+        <item name="android:fontFamily">@font/pretendard_medium_family</item>
+        <item name="fontFamily">@font/pretendard_medium_family</item>
+    </style>
+
+    <!-- ===== 모양(모서리) ===== -->
+    <style name="ShapeAppearance.PeOb.Small" parent="ShapeAppearance.Material3.SmallComponent">
+        <item name="cornerSize">@dimen/corner_sm</item>
+    </style>
+    <style name="ShapeAppearance.PeOb.Medium" parent="ShapeAppearance.Material3.MediumComponent">
+        <item name="cornerSize">@dimen/corner_md</item>
+    </style>
+    <style name="ShapeAppearance.PeOb.Large" parent="ShapeAppearance.Material3.LargeComponent">
+        <item name="cornerSize">@dimen/corner_xl</item>
+    </style>
+
+    <!-- ===== 버튼 ===== -->
+    <!-- 주 버튼(민트 채움). 화면당 1개가 원칙 -->
+    <style name="Widget.PeOb.Button" parent="Widget.Material3.Button">
+        <item name="android:minHeight">@dimen/button_height</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="cornerRadius">@dimen/corner_md</item>
+        <item name="android:textAppearance">@style/TextAppearance.PeOb.Button</item>
+        <item name="android:letterSpacing">0.02</item>
+    </style>
+    <!-- 보조 버튼(어두운 톤 채움) -->
+    <style name="Widget.PeOb.Button.Tonal" parent="Widget.Material3.Button.TonalButton">
+        <item name="android:minHeight">@dimen/button_height</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="cornerRadius">@dimen/corner_md</item>
+        <item name="android:textAppearance">@style/TextAppearance.PeOb.Button</item>
+        <item name="backgroundTint">?attr/colorSurfaceContainerHighest</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="iconTint">?attr/colorOnSurface</item>
+    </style>
+    <!-- 테두리 버튼 -->
+    <style name="Widget.PeOb.Button.Outlined" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:minHeight">@dimen/button_height</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="cornerRadius">@dimen/corner_md</item>
+        <item name="android:textAppearance">@style/TextAppearance.PeOb.Button</item>
+        <item name="strokeColor">?attr/colorOutline</item>
+    </style>
+    <!-- 위험 동작(연결 해제 등) — 빨간 테두리 -->
+    <style name="Widget.PeOb.Button.Outlined.Danger">
+        <item name="strokeColor">?attr/colorError</item>
+        <item name="android:textColor">?attr/colorError</item>
+        <item name="iconTint">?attr/colorError</item>
+        <item name="rippleColor">?attr/colorErrorContainer</item>
+    </style>
+
+    <style name="TextAppearance.PeOb.Button" parent="TextAppearance.PeOb.LabelLarge">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- ===== 카드 ===== -->
+    <style name="Widget.PeOb.Card" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">?attr/colorSurfaceContainer</item>
+        <item name="cardElevation">0dp</item>
+        <item name="shapeAppearance">@style/ShapeAppearance.PeOb.Large</item>
+    </style>
+    <!-- 목록 아이템 등 작은 카드 -->
+    <style name="Widget.PeOb.Card.Compact">
+        <item name="shapeAppearance">@style/ShapeAppearance.PeOb.Medium</item>
+    </style>
+    <!-- 다이얼로그 카드 -->
+    <style name="Widget.PeOb.Card.Dialog">
+        <item name="cardBackgroundColor">?attr/colorSurfaceContainerHigh</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="strokeColor">?attr/colorOutlineVariant</item>
+    </style>
+
+    <!-- ===== 텍스트 ===== -->
+    <!-- 입력칸 위 라벨 (예: "장치 이름") -->
+    <style name="TextAppearance.PeOb.FieldLabel" parent="TextAppearance.PeOb.LabelMedium">
+        <item name="android:textColor">?attr/colorPrimary</item>
+        <item name="android:letterSpacing">0.06</item>
+    </style>
+    <!-- 읽기 전용 값 박스 (기기 관리 화면) -->
+    <style name="Widget.PeOb.ValueField" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">@dimen/field_height</item>
+        <item name="android:background">@drawable/bg_value_field</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingHorizontal">@dimen/space_md</item>
+        <item name="android:textAppearance">?attr/textAppearanceBodyLarge</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+    </style>
+    <!-- 화면 상단 아이콘 버튼 -->
+    <style name="Widget.PeOb.IconButton" parent="">
+        <item name="android:layout_width">@dimen/icon_button</item>
+        <item name="android:layout_height">@dimen/icon_button</item>
+        <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
+        <item name="android:scaleType">center</item>
+        <item name="tint">?attr/colorOnSurfaceVariant</item>
+    </style>
 </resources>

@@ -31,14 +31,13 @@ class DataCollectActivity : AppCompatActivity() {
 
   private lateinit var graph: PedalGraphView
   private lateinit var tvLiveValues: TextView
+  private lateinit var tvJudgeStatus: TextView
   private lateinit var btnCalibrate: MaterialButton
   private lateinit var btnResetCalibration: ImageButton
-  private lateinit var btnLabelMisop: MaterialButton
-  private lateinit var rgStyle: android.widget.RadioGroup
+  private lateinit var tvCollectTitle: TextView
 
   private var calibrationTimer: CountDownTimer? = null
   private var devMode = false
-  private var labelingMisop = false
 
   // 화면 갱신은 BLE 배치(50Hz)마다 오지만, 숫자 텍스트까지 50Hz 로 바꾸면
   // 읽을 수가 없다. 그래프만 매번 갱신하고 텍스트는 100ms 마다.
@@ -66,6 +65,12 @@ class DataCollectActivity : AppCompatActivity() {
             )
           }
         }
+        // 습관 학습 게이트 도달·페르소나 변경 등으로 서비스가 적용한 임계값이 바뀌면 그래프도 따라간다
+        BleService.ACTION_THRESHOLDS_CHANGED -> {
+          BleService.state.appliedThresholdsJson?.let(::applyThresholdsToGraph)
+          updateJudgeStatus()
+        }
+        BleService.ACTION_MONITOR_STATE -> updateJudgeStatus()
         BleService.ACTION_CALIBRATION_DONE -> {
           val json = intent.getStringExtra(BleService.EXTRA_THRESHOLDS_JSON) ?: return
           onCalibrationDone(json)
@@ -80,35 +85,23 @@ class DataCollectActivity : AppCompatActivity() {
 
     graph = findViewById(R.id.graphPedal)
     tvLiveValues = findViewById(R.id.tvLiveValues)
+    tvJudgeStatus = findViewById(R.id.tvJudgeStatus)
     btnCalibrate = findViewById(R.id.btnCalibrate)
     btnResetCalibration = findViewById(R.id.btnResetCalibration)
-    btnLabelMisop = findViewById(R.id.btnLabelMisop)
-    rgStyle = findViewById(R.id.rgStyle)
+    tvCollectTitle = findViewById(R.id.tvCollectTitle)
 
     btnCalibrate.setOnClickListener { startCalibrationFlow() }
     btnResetCalibration.setOnClickListener { confirmResetCalibration() }
 
     devMode = intent.getBooleanExtra(EXTRA_DEV_MODE, false)
     if (devMode) {
-      // dev mode 에서는 "패턴 파악"(연속형 캘리브레이션) 대신 강/보통/약 스타일 라벨링을 쓴다.
-      // INVISIBLE 로 숨겨 tvLegend 등 나머지 레이아웃 제약이 흔들리지 않게 한다(공간은 유지).
-      btnCalibrate.visibility = android.view.View.INVISIBLE
-      btnCalibrate.isEnabled = false
-      btnResetCalibration.visibility = android.view.View.INVISIBLE
-      btnResetCalibration.isEnabled = false
-
-      btnLabelMisop.visibility = android.view.View.VISIBLE
-      btnLabelMisop.setOnClickListener { toggleMisopLabel() }
-
-      rgStyle.visibility = android.view.View.VISIBLE
-      rgStyle.setOnCheckedChangeListener { _, checkedId ->
-        val style = when (checkedId) {
-          R.id.rbStyleStrong -> BleService.STYLE_STRONG
-          R.id.rbStyleNormal -> BleService.STYLE_NORMAL
-          R.id.rbStyleWeak -> BleService.STYLE_WEAK
-          else -> BleService.STYLE_UNSET
-        }
-        setStyleLabel(style)
+      // dev mode: 페르소나 선택 + 재현 실험 버튼을 보인다. 페르소나를 고르면 프리셋 임계값을 쓰므로
+      // 패턴 파악 버튼은 숨긴다("없음"일 때만 보임 — applyPersonaUi 참고).
+      setupPersonaToggle()
+      // 오조작 라벨은 수동 토글 대신 안내형 재현 실험(TrialActivity)이 구간마다 자동으로 찍는다
+      findViewById<MaterialButton>(R.id.btnOpenTrial).apply {
+        visibility = android.view.View.VISIBLE
+        setOnClickListener { startActivity(Intent(this@DataCollectActivity, TrialActivity::class.java)) }
       }
     }
 
@@ -120,6 +113,8 @@ class DataCollectActivity : AppCompatActivity() {
     val filter = IntentFilter().apply {
       addAction(BleService.ACTION_LIVE_SAMPLES)
       addAction(BleService.ACTION_CALIBRATION_DONE)
+      addAction(BleService.ACTION_THRESHOLDS_CHANGED)
+      addAction(BleService.ACTION_MONITOR_STATE)
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       registerReceiver(liveReceiver, filter, RECEIVER_NOT_EXPORTED)
@@ -135,17 +130,14 @@ class DataCollectActivity : AppCompatActivity() {
     // 남은 시간을 역산해 복구한다(2026-07-14, "cal 하다가 다른 앱 가면 멈춘 것처럼 보인다" 수정).
     showExistingCalibration()
     restoreCalibrationProgressIfRunning()
+    applyPersonaUi()
+    updateJudgeStatus()
   }
 
   override fun onPause() {
     super.onPause()
     // 화면을 벗어나면 50Hz 브로드캐스트를 끈다.
     setLiveStream(false)
-    // 라벨링 중이었다면 다음 세션에 새지 않도록 정상/미설정으로 되돌린다.
-    if (devMode) {
-      if (labelingMisop) setMisopLabel(false)
-      setStyleLabel(BleService.STYLE_UNSET)
-    }
     // 캘리브레이션 자체는 BleService 안에서 화면과 무관하게 계속 진행된다 —
     // 여기서 취소하는 건 화면에 남은 카운트다운 UI뿐.
     calibrationTimer?.cancel()
@@ -167,39 +159,68 @@ class DataCollectActivity : AppCompatActivity() {
 
   // --- 개발자 전용 오조작 라벨링 (AI 학습 데이터 수집) ---
 
-  private fun toggleMisopLabel() {
-    setMisopLabel(!labelingMisop)
-  }
+  // --- 개발자 페르소나 ---
 
-  private fun setMisopLabel(misop: Boolean) {
-    labelingMisop = misop
-    startService(Intent(this, BleService::class.java).apply {
-      action = BleService.ACTION_SET_LABEL
-      putExtra(BleService.EXTRA_LABEL, if (misop) BleService.LABEL_MISOP else BleService.LABEL_NORMAL)
-    })
-    if (misop) {
-      btnLabelMisop.setText(R.string.btn_label_misop)
-      btnLabelMisop.backgroundTintList = android.content.res.ColorStateList.valueOf(
-        androidx.core.content.ContextCompat.getColor(this, R.color.red_error)
-      )
-    } else {
-      btnLabelMisop.setText(R.string.btn_label_normal)
-      btnLabelMisop.backgroundTintList = android.content.res.ColorStateList.valueOf(
-        androidx.core.content.ContextCompat.getColor(this, R.color.text_hint)
-      )
+  // 페르소나 토글 — "없음" + Persona 목록으로 버튼을 만든다(페르소나 추가 시 여기 수정 불필요).
+  // 고른 값은 화면을 나가도 유지된다(그래야 수집 화면 없이 주행해도 그 페르소나로 기록됨).
+  // 감시 중이면 서비스가 그 페르소나의 캘리브레이션으로 즉시 바꾸게 알린다.
+  private fun setupPersonaToggle() {
+    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    val group = findViewById<com.google.android.material.button.MaterialButtonToggleGroup>(R.id.togglePersona)
+    group.visibility = android.view.View.VISIBLE
+    val current = CalibrationPrefs.currentPersona(prefs)
+    val options: List<Persona?> = listOf(null) + Persona.entries
+    options.forEach { persona ->
+      val button = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+        id = android.view.View.generateViewId()
+        tag = persona?.id ?: Persona.NONE_ID
+        setText(persona?.labelRes ?: R.string.persona_none)
+      }
+      group.addView(button, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+      if (persona == current) group.check(button.id)
+    }
+    group.addOnButtonCheckedListener { _, checkedId, isChecked ->
+      if (!isChecked) return@addOnButtonCheckedListener
+      val persona = Persona.fromId(group.findViewById<MaterialButton>(checkedId).tag as String)
+      if (persona == CalibrationPrefs.currentPersona(prefs)) return@addOnButtonCheckedListener
+      CalibrationPrefs.setCurrentPersona(prefs, persona)
+      if (BleService.state.monitor.isActive) {
+        startService(Intent(this, BleService::class.java).apply { action = BleService.ACTION_SET_PERSONA })
+      }
+      // 페르소나마다 임계값이 다르므로 그래프 임계선·제목·버튼도 새로 반영
+      graph.setThresholds(PedalGraphView.DEFAULT_ACCEL_HIGH, PedalGraphView.DEFAULT_BRAKE_LOW)
+      showExistingCalibration()
+      applyPersonaUi()
+      updateJudgeStatus()
     }
   }
 
-  private fun setStyleLabel(style: String) {
-    startService(Intent(this, BleService::class.java).apply {
-      action = BleService.ACTION_SET_STYLE
-      putExtra(BleService.EXTRA_STYLE, style)
-    })
+  // dev mode 에서 페르소나를 골라 뒀으면: 제목에 표시(지금 누구로 기록되는지) + 영점 조절 버튼 숨김
+  // (프리셋을 쓰므로 캘리브레이션이 필요 없고, 누르면 사용자 본인 캘리브레이션을 덮어쓰게 되므로).
+  // INVISIBLE 로 숨겨 tvLegend 등 나머지 레이아웃 제약이 흔들리지 않게 한다.
+  private fun applyPersonaUi() {
+    val persona = currentDevPersona()
+    tvCollectTitle.text = if (persona == null) {
+      getString(R.string.title_data_collect)
+    } else {
+      getString(R.string.title_data_collect_persona, getString(R.string.title_data_collect), getString(persona.labelRes))
+    }
+    val visibility = if (persona == null) android.view.View.VISIBLE else android.view.View.INVISIBLE
+    btnCalibrate.visibility = visibility
+    btnResetCalibration.visibility = visibility
   }
 
-  // --- 연속형 개인화 캘리브레이션("패턴 파악") ---
+  private fun currentDevPersona(): Persona? =
+    if (devMode) CalibrationPrefs.currentPersona(getSharedPreferences("AgPrefs", MODE_PRIVATE)) else null
+
+  // --- 브레이크 영점 조절(옛 "패턴 파악") ---
 
   private fun startCalibrationFlow() {
+    // 서비스도 감시 중이 아니면 요청을 무시한다(BleService ACTION_START_CALIBRATION 참고) — 여기선 카운트다운을 띄우지 않고 이유를 알린다
+    if (BleService.state.monitor != MonitorState.MONITORING) {
+      Toast.makeText(this, R.string.msg_calibration_needs_monitoring, Toast.LENGTH_LONG).show()
+      return
+    }
     startService(Intent(this, BleService::class.java).apply {
       action = BleService.ACTION_START_CALIBRATION
     })
@@ -254,18 +275,69 @@ class DataCollectActivity : AppCompatActivity() {
     btnCalibrate.setText(R.string.btn_calibrate)
     applyThresholdsToGraph(thresholdsJson)
     try {
-      val accelHigh = JSONObject(thresholdsJson).getDouble("accel_high")
-      Toast.makeText(this, getString(R.string.msg_calibration_done, accelHigh), Toast.LENGTH_LONG).show()
+      val brakeLow = JSONObject(thresholdsJson).getDouble("brake_low")
+      Toast.makeText(this, getString(R.string.msg_calibration_done, brakeLow), Toast.LENGTH_LONG).show()
     } catch (e: Exception) {
       Log.e(tag, "캘리브레이션 결과 파싱 실패: ${e.message}", e)
     }
   }
 
-  // 이미 캘리브레이션된 값이 있으면(다음 주행 재사용 케이스) 화면 진입 시 바로 그래프에 반영한다.
-  // 없으면 PedalGraphView 기본값(0.85/0.10)이 임시 참고선으로 남는다.
+  // 지금 판정이 켜져 있는지 + 임계값이 어디서 왔는지(2026-09-26 실주행: 페르소나 프리셋으로 이미 판정 중인데
+  // "영점 조절 안 했으니 경고 없음"으로 오해했다). 서비스가 실제 적용 중인 값(appliedThresholdsJson)만 본다 —
+  // 출처 우선순위는 BleService.readCalibratedThresholds 와 같다(페르소나 > 습관 학습 > 기본값).
+  // 페르소나 문구는 개발자가 골라 둔 경우에만 나온다(메인 화면 calibration_done 과 같은 기준).
+  private fun updateJudgeStatus() {
+    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
+    val service = BleService.state
+    val accelHigh = service.appliedThresholdsJson?.let {
+      try { JSONObject(it).getDouble("accel_high") } catch (e: Exception) { null }
+    }
+    val persona = CalibrationPrefs.currentPersona(prefs)
+    val habit = CalibrationPrefs.habitProgress(prefs)
+    val judgeStatus = service.judge
+    val status = when {
+      !service.monitor.isActive -> getString(R.string.judge_status_off)
+      // 임계값이 있어도 상태기계를 못 만들었거나 판정 호출이 계속 실패하면 판정 오류(JudgeStatus 참고)
+      judgeStatus == JudgeStatus.FAILED -> getString(R.string.judge_status_failed)
+      judgeStatus == JudgeStatus.CALIBRATING || accelHigh == null -> getString(R.string.judge_status_paused)
+      persona != null -> getString(R.string.judge_status_persona, getString(persona.labelRes), accelHigh)
+      habit?.ready == true -> getString(R.string.judge_status_habit, accelHigh)
+      habit != null -> getString(R.string.judge_status_default_learning, accelHigh, habit.events, habit.gate)
+      else -> getString(R.string.judge_status_default, accelHigh)
+    }
+    // PC 학습 결과는 사용자 판정 경로에만 반영되므로(BleService.readCalibratedThresholds) 그때만 붙인다
+    val learned = if (judgeStatus == JudgeStatus.ACTIVE && accelHigh != null && persona == null) learnedSummary() else null
+    tvJudgeStatus.text = if (learned != null) "$status\n$learned" else status
+  }
+
+  // "AI 학습 · 세션 20개 (10/01)". 합성 데이터 비율은 개발 맥락이라 dev mode 에서만 보인다.
+  private fun learnedSummary(): String? {
+    val info = BleService.state.learnedInfoJson ?: return null
+    return try {
+      val json = JSONObject(info)
+      val sessions = json.getInt("sessions")
+      val date = json.getString("trained_at").take(10).drop(5).replace('-', '/')
+      val synthetic = json.optInt("synthetic_sessions", 0)
+      if (devMode && synthetic > 0) getString(R.string.judge_learned_synthetic, sessions, date, synthetic)
+      else getString(R.string.judge_learned, sessions, date)
+    } catch (e: Exception) {
+      null
+    }
+  }
+
+  // 화면 진입 시 그래프 임계선을 맞춘다. 서비스가 판정 중이면 실제 적용값(습관 학습 반영)을 그대로 그리고,
+  // 꺼져 있거나 패턴 파악 중이면 prefs 로 추정한다(없으면 PedalGraphView 기본값).
   private fun showExistingCalibration() {
-    val json = getSharedPreferences("AgPrefs", MODE_PRIVATE)
-      .getString(BleService.PREF_CALIBRATED_THRESHOLDS, null) ?: return
+    BleService.state.appliedThresholdsJson?.let {
+      applyThresholdsToGraph(it)
+      return
+    }
+    // 개발자 페르소나를 골라 뒀으면 그 프리셋 임계선을 그린다(brake_low 는 기본값)
+    currentDevPersona()?.let {
+      graph.setThresholds(it.accelHigh, PedalGraphView.DEFAULT_BRAKE_LOW)
+      return
+    }
+    val json = CalibrationPrefs.userCalibration(getSharedPreferences("AgPrefs", MODE_PRIVATE)) ?: return
     applyThresholdsToGraph(json)
   }
 
@@ -279,7 +351,7 @@ class DataCollectActivity : AppCompatActivity() {
     }
   }
 
-  // 초기화하면 오조작 감지가 다시 꺼지므로(캘리브레이션 전 = 판정 안 함) 확인을 받는다.
+  // 초기화하면 개인 맞춤 임계값이 사라지고 기본값으로 돌아가므로 확인을 받는다.
   private fun confirmResetCalibration() {
     androidx.appcompat.app.AlertDialog.Builder(this)
       .setTitle(R.string.title_reset_calibration_confirm)

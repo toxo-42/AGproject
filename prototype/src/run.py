@@ -13,7 +13,7 @@ high_ratio를 그대로 앱에 옮겨도 되는 상태.
 
 from __future__ import annotations
 
-from judge import PROFILES, judge
+from peob.judge import PROFILES, judge
 from synth import SAMPLE_RATE_HZ, misoperation, normal_drive
 from windowing import sliding_windows
 

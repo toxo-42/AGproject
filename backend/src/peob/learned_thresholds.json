@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "trained_at": "2026-10-25T08:17:29",
+  "model": "logistic_regression",
+  "accel_high": {
+    "slope": 0.2896,
+    "intercept": 0.4101,
+    "mode": "slope",
+    "formula": "accel_high = slope * accel_active_p90 + intercept"
+  },
+  "accel_rate_high": 0.2293,
+  "fixed": {
+    "brake_low": 0.1,
+    "high_ratio": 0.5
+  },
+  "data": {
+    "sessions": 20,
+    "synthetic_sessions": 0,
+    "rows": 112015,
+    "level_examples": {
+      "misop": 660,
+      "normal": 39062
+    },
+    "rate_examples": {
+      "misop": 65,
+      "normal": 62148
+    },
+    "persona_p90": {
+      "aggressive": 0.8516,
+      "beginner": 0.3607,
+      "dad": 0.7656,
+      "none": 0.8301,
+      "normal": 0.5225,
+      "self": 0.4812,
+      "seungmin": 0.7262
+    }
+  },
+  "validation": {
+    "learned": {
+      "recall": 0.938,
+      "detected": "61/65",
+      "normal_trial_false": "0/25",
+      "driving_false_per_hour": 15.8,
+      "driving_hours": 3.609
+    },
+    "current": {
+      "recall": 0.846,
+      "detected": "55/65",
+      "normal_trial_false": "0/25",
+      "driving_false_per_hour": 0.55,
+      "driving_hours": 3.609
+    }
+  },
+  "adopt": false
+}

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 설정 다이얼로그 (기기 관리 화면 톱니 아이콘). 설정 항목이 늘면 여기에 한 줄씩 추가한다. -->
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    style="@style/Widget.PeOb.Card.Dialog"
+    android:layout_width="@dimen/dialog_width"
+    android:layout_height="wrap_content">
+
+  <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:orientation="vertical"
+      android:padding="@dimen/space_lg">
+
+    <TextView
+        android:text="@string/title_settings"
+        android:textAppearance="?attr/textAppearanceTitleLarge"
+        android:textColor="?attr/colorOnSurface"
+        android:textStyle="bold"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="@dimen/space_lg"/>
+
+    <!-- 페달 테두리 표시 on/off -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="@dimen/space_lg">
+
+      <LinearLayout
+          android:layout_width="0dp"
+          android:layout_weight="1"
+          android:layout_height="wrap_content"
+          android:orientation="vertical"
+          android:layout_marginEnd="@dimen/space_sm">
+
+        <TextView
+            android:text="@string/label_pedal_edge"
+            android:textAppearance="?attr/textAppearanceBodyLarge"
+            android:textColor="?attr/colorOnSurface"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <TextView
+            android:text="@string/desc_pedal_edge"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+      </LinearLayout>
+
+      <com.google.android.material.materialswitch.MaterialSwitch
+          android:id="@+id/swPedalEdge"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"/>
+    </LinearLayout>
+
+    <!-- 운전 성향 진단 화면 진입 (Phase F) -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnOpenDrivingStyle"
+        style="@style/Widget.PeOb.Button.Tonal"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/button_height"
+        android:layout_marginBottom="@dimen/space_sm"
+        android:text="@string/btn_driving_style"/>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnOpenTtsSettings"
+        style="@style/Widget.PeOb.Button.Tonal"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/button_height"
+        android:layout_marginBottom="@dimen/space_sm"
+        android:text="@string/btn_tts_settings"/>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnCloseSettings"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/button_height"
+        android:text="@string/btn_close"/>
+
+  </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

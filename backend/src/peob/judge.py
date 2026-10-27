@@ -1,0 +1,259 @@
+"""페달 오조작 판정 — ★ 이 파일이 Chaquopy로 그대로 이식된다.
+
+계약(Contract) — 앱이 쓰는 경로(2026-09-24~):
+  new_detector(임계값 JSON) → MisopDetector  (주행 세션 하나 = 인스턴스 하나, Kotlin 이 PyObject 로 보관)
+  MisopDetector.step_json(윈도우 JSON) → {"misop", "trigger", "score", "rate", "armed", "consecutive", "fired", ...}
+    입력 윈도우: [[accel, brake], ...] (0.25초 = 50샘플)
+    임계값: {"accel_high", "brake_low", "high_ratio", "accel_rate_high"} — calibration/habit/learned 가 정한다.
+  코어는 judge_with_thresholds(윈도우 하나, 순수 함수) + MisopDetector(여러 윈도우에 걸친 상태기계).
+
+옛 경로(3단계 프로필, 2026-07-13 폐기): PROFILES / judge() / judge_json() 은 PC 데모(prototype/src/run.py)용으로만 남아 있다.
+
+Kotlin <-> Python 경계를 단순하게 유지하려고:
+  - 입력은 중첩 리스트(기본 자료형)와 문자열만. numpy 객체를 인자로 받지 않는다.
+  - 출력은 JSON 직렬화 가능한 dict. (Chaquopy 경계에선 *_json 함수로 JSON 문자열을 주고받는다)
+
+개인화 구조:
+  '이 사람에게 맞는 임계값이 얼마인가'(calibration·habit·learned)와 '지금 이 윈도우가
+  오조작인가'(여기)를 분리한다. 임계값을 통계 규칙으로 정하든 학습으로 정하든 이 파일은 바뀌지 않는다.
+
+판정 규칙을 바꾸면 PC 검증(prototype)과 앱에 동시에 반영된다 — 같은 파일을 공유하기 때문.
+"""
+
+from __future__ import annotations
+
+import json
+
+# RAW 스트림은 STM32 200Hz 고정(BLE_RAW_스트림_규격.md §3) — 샘플 간격 5ms.
+# 사람이 페달을 "확 밟아도" 보통 50~150ms는 걸리므로, 급조작 트리거는 인접 샘플(5ms)이
+# 아니라 이만큼(=10샘플=50ms) 떨어진 샘플과 비교해야 실제로 의미 있는 델타가 나온다
+# (2026-07-14, 인접 샘플 기준으로 갔다가 트리거가 전혀 안 뜨는 문제를 겪고 수정).
+RATE_LAG_SAMPLES = 10
+
+# 프로필별 판정 임계값 --------------------------------------------------------
+# ⚠️ 전부 실데이터 튜닝 전 임시값. 아래는 '의도'일 뿐이며 측정으로 대체해야 한다.
+#
+#   accel_high     : 엑셀이 이 이상이면 '깊게 밟음'
+#   brake_low      : 브레이크가 이 이하면 '거의 안 밟음'
+#   high_ratio     : 윈도우 내 '엑셀 깊게 + 브레이크 안 밟음' 비율이 이 이상이면 오조작(레벨 조건)
+#   accel_rate_high: RATE_LAG_SAMPLES(50ms) 간격 엑셀 변화량(델타)의 최댓값이 이 이상이면
+#                    '급조작'(트리거 조건)
+#
+# 의도: 평소 페달을 깊게 밟는 사람(strong)에겐 깊게 밟는 것 자체가 정상이므로
+#       accel_high 를 올려 오경보를 줄이고, 약하게 밟는 사람(weak)은 낮춰 민감하게 한다.
+#       brake_low 도 같은 방향으로 움직인다(강하게 밟는 사람은 '살짝 밟은' 값도 크다).
+#       accel_rate_high 도 마찬가지로 강하게 밟는 사람은 평소에도 빠르게 밟는 경향이 있어 올린다.
+PROFILES: dict[str, dict[str, float]] = {
+    "strong": {"accel_high": 0.92, "brake_low": 0.15, "high_ratio": 0.55, "accel_rate_high": 0.35},
+    "normal": {"accel_high": 0.85, "brake_low": 0.10, "high_ratio": 0.50, "accel_rate_high": 0.30},
+    "weak": {"accel_high": 0.75, "brake_low": 0.07, "high_ratio": 0.45, "accel_rate_high": 0.25},
+}
+
+DEFAULT_PROFILE = "normal"
+
+
+def get_thresholds(profile: str) -> dict[str, float]:
+    """프로필 이름 -> 임계값 세트. 모르는 이름이면 기본 프로필로 떨어진다.
+
+    앱에서 프로필이 아직 판정되지 않았거나 저장값이 깨진 경우에도
+    판정이 멈추지 않고 '보통' 기준으로 계속 동작해야 한다.
+    """
+    return PROFILES.get(profile, PROFILES[DEFAULT_PROFILE])
+
+
+def thresholds_json(profile: str = DEFAULT_PROFILE) -> str:
+    """Chaquopy 경계용: 프로필의 임계값 세트를 JSON 문자열로 반환.
+
+    데이터 수집 화면이 그래프에 임계선을 그릴 때 쓴다. Kotlin 이 임계값을
+    따로 하드코딩하지 않게 해서 PROFILES 를 단일 소스로 유지한다.
+    """
+    return json.dumps(get_thresholds(profile))
+
+
+def judge_with_thresholds(samples: list[list[float]], thresholds: dict[str, float], label: str) -> dict:
+    """윈도우 하나 + 임계값 세트를 직접 받아 오조작 여부를 판정.
+
+    3단계 프로필(get_thresholds)이든, 캘리브레이션으로 계산한 연속형 임계값
+    (calibration.calibrate_thresholds)이든 이 함수 입장에서는 그냥 숫자 4개일
+    뿐이다 — '어디서 온 임계값인가'와 '지금 오조작인가'를 분리하기 위한 공용 코어.
+
+    두 조건을 따로 계산해서 각각 다른 역할로 쓴다(2026-07-14 사용자 결정):
+      - misop   : 레벨 조건(엑셀 깊게 + 브레이크 안 밟음 비율). "지금 이 상태가
+                  유지되고 있는가" — 호출부(BleService)의 지속시간(sustain) 판정에 쓴다.
+      - trigger : 변화율(미분) 조건. RATE_LAG_SAMPLES 만큼 떨어진 두 샘플 사이 엑셀 델타의
+                  최댓값이 accel_rate_high 이상이면 True — "방금 급격히 밟았는가"를 잡는다.
+                  급조작(찰나에 확 밟음)과 서서히 페달을 깊게 밟아가는 정상 주행을 구분하려고
+                  misop과 분리했다. 트리거는 순간적인 사건이라 misop처럼 여러 윈도우 연속을
+                  요구하면 안 된다(스파이크 직후엔 이미 레벨이 높아서 델타가 다시 작아지기
+                  때문) — 지속시간 판정은 misop 쪽에서 하고, trigger는 그 지속시간 카운트를
+                  시작해도 되는지 '무장(arm)'만 담당한다.
+
+                  ⚠️ 2026-07-14 실기기 검증 후 수정: 처음엔 "인접 샘플(5ms) 간 델타"로
+                  계산했는데, 사람이 페달을 확 밟아도 보통 50~150ms는 걸려서 5ms 단위로 보면
+                  델타가 0.03~0.1 수준밖에 안 나와 accel_rate_high(0.25~0.35)를 절대
+                  못 넘겼다(트리거가 영영 안 뜸). "확 밟기"의 실제 시간 스케일에 맞추려고
+                  인접 샘플이 아니라 RATE_LAG_SAMPLES(50ms)만큼 떨어진 샘플과 비교한다.
+
+    label 은 결과의 "profile" 필드에 그대로 실린다(로그/디버깅용 표시 이름).
+    """
+    if not samples:
+        return {"misop": False, "trigger": False, "score": 0.0, "rate": 0.0, "profile": label, "reason": "empty"}
+
+    accel_high = thresholds["accel_high"]
+    brake_low = thresholds["brake_low"]
+    high_ratio = thresholds["high_ratio"]
+    accel_rate_high = thresholds["accel_rate_high"]
+
+    hits = 0
+    max_rate = 0.0
+    for i, (accel, brake) in enumerate(samples):
+        if accel >= accel_high and brake <= brake_low:
+            hits += 1
+        if i >= RATE_LAG_SAMPLES:
+            max_rate = max(max_rate, accel - samples[i - RATE_LAG_SAMPLES][0])
+
+    score = hits / len(samples)
+    misop = score >= high_ratio
+    trigger = max_rate >= accel_rate_high
+    reason = (
+        f"[{label}] 엑셀>={accel_high} & 브레이크<={brake_low} 비율 {score:.2f}"
+        f" ({'>=' if misop else '<'} {high_ratio}) / 델타 {max_rate:.2f}"
+        f" ({'>=' if trigger else '<'} {accel_rate_high})"
+    )
+    return {
+        "misop": misop,
+        "trigger": trigger,
+        "score": round(score, 3),
+        "rate": round(max_rate, 3),
+        "profile": label,
+        "reason": reason,
+    }
+
+
+# ── 오조작 경고 상태기계 (2026-09-24 BleService.judgeWindow 에서 이관) ──────────────
+# 급발진 시나리오는 엑셀을 브레이크로 착각해 "꾹 밟고 유지"하는 패턴이라, 짧은 스파이크성
+# 오조작(밟았다 바로 뗌)과 구분하려면 misop=true 가 일정 시간 이상 연속으로 나와야 한다
+# (2026-07-13 사용자 결정). 값은 전부 실측 튜닝 전 임시값.
+MISOP_SUSTAIN_WINDOWS = 1        # 윈도우 1개 = 0.25초
+MISOP_GAP_TOLERANCE_WINDOWS = 1  # 지속 도중 misop=false 를 이만큼까지는 봐준다(센서 노이즈 등)
+
+
+class MisopDetector:
+    """윈도우 판정 결과를 누적해 "지금 경고를 띄울지"를 정하는 상태기계.
+
+    judge_with_thresholds() 는 윈도우 하나만 보는 순수 함수이고, 여러 윈도우에 걸친
+    상태(무장/지속/여유)는 여기서만 관리한다. 인스턴스 하나 = 세션 하나(임계값 하나).
+    Kotlin(BleService)이 임계값이 정해질 때마다 new_detector() 로 새로 만들어 보관한다
+    — 상태의 소유자가 인스턴스 하나로 명확하도록 모듈 전역 상태는 쓰지 않는다.
+
+    흐름:
+      1. trigger(엑셀 변화율 급증)가 뜨면 무장(armed). 트리거 없이 서서히 레벨만 올라간
+         경우는 애초에 카운트가 시작되지 않는다(2026-07-14 사용자 결정).
+      2. 무장 상태에서 misop=true 가 MISOP_SUSTAIN_WINDOWS 연속이면 경고 1회(fired).
+      3. misop=false 가 MISOP_GAP_TOLERANCE_WINDOWS 를 넘기면 회복으로 보고 무장 해제 —
+         다음 경고는 새 트리거가 있어야 다시 뜬다.
+
+    ⚠️ 버그 수정(2026-07-18, 실측 데이터로 원인 확정): gap 카운터는 misop=true 일 때만
+    리셋되고 무장 해제 시엔 리셋되지 않았다. 그래서 한 번 "무장→gap 초과→해제"가 일어나면
+    gap 이 문턱값 위에 남은 채로 다음 재현이 시작돼, 새로 무장되자마자 misop=false 윈도우
+    하나에 즉시 재해제됐다(짧게 훅 밟으면 첫 윈도우 score 가 낮게 나오는 경우가 많아 recall 이
+    세션마다 들쭉날쭉했던 원인). 트리거가 뜰 때마다 gap 도 같이 리셋한다.
+    """
+
+    def __init__(self, thresholds: dict[str, float]) -> None:
+        self.thresholds = thresholds
+        self.armed = False
+        self.consecutive = 0   # 무장 후 연속 misop 윈도우 수
+        self.gap = 0           # 지속 도중 연속 misop=false 윈도우 수
+        self.shown = False     # 이번 무장 구간에서 이미 경고했는가(같은 오조작 중복 경고 방지)
+
+    def step(self, samples: list[list[float]]) -> dict:
+        """윈도우 하나를 판정하고 상태를 갱신. judge 결과에 armed/consecutive/fired 를 붙여 반환."""
+        return self.step_result(judge_with_thresholds(samples, self.thresholds, "personalized"))
+
+    def step_result(self, result: dict) -> dict:
+        """이미 계산된 윈도우 판정 결과(misop/trigger 포함)로 상태만 갱신.
+
+        step() 의 상태기계 부분. 원시 샘플 없이 CSV 행에서 misop/trigger 를 복원해 같은 상태기계를
+        다시 돌려볼 때(prototype/train_thresholds.py 의 임계값 검증) 로직을 복사하지 않고 쓰려고 분리했다.
+        """
+        if result["trigger"]:
+            self.armed = True
+            self.gap = 0
+
+        fired = False
+        if self.armed:
+            if result["misop"]:
+                self.consecutive += 1
+                self.gap = 0
+            else:
+                self.gap += 1
+                if self.gap > MISOP_GAP_TOLERANCE_WINDOWS:
+                    self.consecutive = 0
+                    self.armed = False
+                    self.shown = False
+
+            if self.consecutive >= MISOP_SUSTAIN_WINDOWS and not self.shown:
+                self.shown = True
+                fired = True
+
+        return {**result, "armed": self.armed, "consecutive": self.consecutive, "fired": fired}
+
+    def step_json(self, samples_json: str) -> str:
+        """Chaquopy 경계용: JSON 문자열 윈도우 -> step() 결과 JSON 문자열."""
+        return json.dumps(self.step(json.loads(samples_json)), ensure_ascii=False)
+
+
+def new_detector(thresholds_json_str: str) -> MisopDetector:
+    """Chaquopy 경계용: 캘리브레이션 임계값(JSON 문자열)으로 새 상태기계를 만든다.
+
+    Kotlin 쪽:
+      val detector = py.getModule("judge").callAttr("new_detector", thresholdsJson)   // PyObject 보관
+      val resultJson = detector.callAttr("step_json", samplesJson).toString()
+    """
+    return MisopDetector(json.loads(thresholds_json_str))
+
+
+def judge(samples: list[list[float]], profile: str = DEFAULT_PROFILE) -> dict:
+    """윈도우 하나를 받아 오조작 여부를 판정.
+
+    예시 휴리스틱: 윈도우 안에서 '엑셀을 깊게 밟으면서 브레이크는 거의
+    안 밟은' 샘플 비율이 임계값을 넘으면 오조작으로 본다.
+    """
+    return judge_with_thresholds(samples, get_thresholds(profile), profile)
+
+
+def judge_json(samples_json: str, profile: str = DEFAULT_PROFILE) -> str:
+    """Chaquopy 경계용: Kotlin이 JSON 문자열로 넘긴 윈도우를 판정해 JSON 문자열로 반환.
+
+    입출력을 모두 JSON '문자열'로 주고받는 이유:
+      Chaquopy는 Java의 ArrayList 를 Python list 로 자동 변환하지 않아서,
+      윈도우(중첩 리스트)를 그대로 넘기면 'ArrayList object is not iterable' 이 난다.
+      문자열로 직렬화해 넘기면 Java<->Python 컬렉션 변환 문제를 완전히 피한다.
+      (profile 은 단순 문자열이라 Chaquopy가 그대로 변환해준다.)
+
+    profile 은 기본값이 있으므로 Kotlin이 인자 1개로 호출해도 동작한다(= 기존 호출부 호환).
+
+    Kotlin 쪽:
+      val samplesJson = JSONArray(...).toString()       // "[[0.95,0.0], ...]"
+      val resultJson = py.callAttr("judge_json", samplesJson, "normal").toString()
+    """
+    samples = json.loads(samples_json)
+    return json.dumps(judge(samples, profile), ensure_ascii=False)
+
+
+def judge_calibrated_json(samples_json: str, thresholds_json_str: str) -> str:
+    """Chaquopy 경계용: 캘리브레이션으로 계산한 연속형 임계값으로 판정.
+
+    3단계 프로필 대신 개인화된 임계값(calibration.calibrate_thresholds 로 만든
+    {"accel_high":.., "brake_low":.., "high_ratio":..} 딕셔너리)을 쓸 때 이걸 호출한다.
+    judge_json 과 마찬가지로 Kotlin<->Python 경계는 JSON 문자열로만 주고받는다.
+
+    Kotlin 쪽:
+      val thresholdsJson = JSONObject(calibratedMap).toString()
+      val resultJson = py.callAttr("judge_calibrated_json", samplesJson, thresholdsJson).toString()
+    """
+    samples = json.loads(samples_json)
+    thresholds = json.loads(thresholds_json_str)
+    result = judge_with_thresholds(samples, thresholds, "personalized")
+    return json.dumps(result, ensure_ascii=False)

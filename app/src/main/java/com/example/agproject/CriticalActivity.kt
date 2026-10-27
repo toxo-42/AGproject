@@ -1,11 +1,10 @@
 package com.example.agproject
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
-import android.widget.ImageView
 import androidx.appcompat.app.AppCompatActivity
-import com.bumptech.glide.Glide
 import com.google.android.material.button.MaterialButton
 
 class CriticalActivity : AppCompatActivity() {
@@ -17,19 +16,32 @@ class CriticalActivity : AppCompatActivity() {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_critical)
 
-    // 2. UI 연결
-    val ivCriticalIcon = findViewById<ImageView>(R.id.ivCriticalIcon)
+    // 2. UI 연결 (경고 애니메이션은 PedalGuideView 가 스스로 그린다)
     val btnDismiss = findViewById<MaterialButton>(R.id.btnDismiss)
 
-    // 3. 경고 움짤(WebP) 재생 (Glide 사용)
-    Glide.with(this)
-      .load(R.drawable.warning_red_blink) // 준비한 이미지 파일
-      .into(ivCriticalIcon)
-
-    // 4. 확인 버튼 누르면 -> 화면 끄기
+    // 3. 확인 버튼 누르면 -> 화면 끄기
     btnDismiss.setOnClickListener {
       finish() // 액티비티 종료
     }
+  }
+
+  // 경고 화면이 보이는 동안엔 페달 테두리(다른 앱 위 오버레이)가 경고 위에 겹치지 않게 끈다.
+  override fun onStart() {
+    super.onStart()
+    notifyCriticalShowing(true)
+  }
+
+  override fun onStop() {
+    notifyCriticalShowing(false)
+    super.onStop()
+  }
+
+  private fun notifyCriticalShowing(showing: Boolean) {
+    if (!BleService.state.monitor.isActive) return
+    startService(Intent(this, BleService::class.java).apply {
+      action = BleService.ACTION_SET_CRITICAL_SHOWING
+      putExtra(BleService.EXTRA_CRITICAL_SHOWING, showing)
+    })
   }
 
   // 운전자가 당황해서 실수로 뒤로가기를 눌러 경고창이 꺼지는 것을 방지합니다.

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 운전 성향 진단 화면 (설정 → 운전 성향 진단). 내용은 DrivingStyleActivity 가 peob.style 보고서로 채운다. -->
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/colorSurface">
+
+  <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:orientation="vertical"
+      android:paddingHorizontal="@dimen/screen_padding"
+      android:paddingTop="@dimen/space_xl"
+      android:paddingBottom="@dimen/space_xl">
+
+    <TextView
+        android:text="@string/title_driving_style"
+        android:textAppearance="?attr/textAppearanceHeadlineSmall"
+        android:textColor="?attr/colorOnSurface"
+        android:textStyle="bold"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="@dimen/space_lg"/>
+
+    <!-- 결과: 유형(또는 "데이터 모으는 중") + 한 줄 설명 -->
+    <com.google.android.material.card.MaterialCardView
+        style="@style/Widget.PeOb.Card"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="@dimen/space_lg">
+
+      <LinearLayout
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:orientation="vertical"
+          android:padding="@dimen/space_lg">
+
+        <TextView
+            android:id="@+id/tvStyleLabel"
+            android:textAppearance="?attr/textAppearanceDisplaySmall"
+            android:textColor="?attr/colorPrimary"
+            android:textStyle="bold"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <TextView
+            android:id="@+id/tvStyleDesc"
+            android:textAppearance="?attr/textAppearanceBodyLarge"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_sm"/>
+
+        <com.google.android.material.progressindicator.LinearProgressIndicator
+            android:id="@+id/progressStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_md"
+            android:visibility="gone"/>
+      </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- 근거: 지표별 내 값 · 성향별 기준값 (행은 코드에서 추가) -->
+    <TextView
+        android:id="@+id/tvMetricsTitle"
+        android:text="@string/style_metrics_title"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        android:textColor="?attr/colorOnSurface"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="@dimen/space_sm"/>
+
+    <LinearLayout
+        android:id="@+id/layoutMetrics"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"/>
+
+    <TextView
+        android:id="@+id/tvStyleNote"
+        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_lg"/>
+
+    <!-- 운전 패턴(성향 누적) 초기화 — 확인 후 처음부터 다시 모은다 -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnResetStyle"
+        style="@style/Widget.PeOb.Button.Outlined.Danger"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/button_height"
+        android:layout_marginTop="@dimen/space_xl"
+        android:text="@string/btn_reset_style"/>
+  </LinearLayout>
+</ScrollView>

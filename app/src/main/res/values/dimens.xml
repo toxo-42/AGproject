@@ -1,5 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <dimen name="card_corner_radius">50dp</dimen>
-  <dimen name="card_margin_horizontal">30dp</dimen>
+  <!-- 간격: 4dp 배수(8dp 그리드). 화면마다 숫자를 직접 쓰지 말고 이 값을 쓴다. -->
+  <dimen name="space_xs">4dp</dimen>
+  <dimen name="space_sm">8dp</dimen>
+  <dimen name="space_md">16dp</dimen>
+  <dimen name="space_lg">24dp</dimen>
+  <dimen name="space_xl">32dp</dimen>
+  <dimen name="space_xxl">48dp</dimen>
+  <dimen name="screen_padding">24dp</dimen>
+
+  <!-- 모서리 -->
+  <dimen name="corner_sm">12dp</dimen>
+  <dimen name="corner_md">16dp</dimen>
+  <dimen name="corner_lg">24dp</dimen>
+  <dimen name="corner_xl">28dp</dimen>
+
+  <!-- 컴포넌트 크기 -->
+  <dimen name="button_height">56dp</dimen>
+  <dimen name="button_height_large">64dp</dimen>
+  <dimen name="field_height">52dp</dimen>
+  <dimen name="icon_button">48dp</dimen>
+  <dimen name="dialog_width">312dp</dimen>
+
+  <dimen name="card_corner_radius">@dimen/corner_xl</dimen>
+  <dimen name="card_margin_horizontal">@dimen/screen_padding</dimen>
 </resources>

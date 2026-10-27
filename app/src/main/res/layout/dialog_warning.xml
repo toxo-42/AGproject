@@ -2,59 +2,55 @@
 <com.google.android.material.card.MaterialCardView
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="300dp"
-    android:layout_height="wrap_content"
-    app:cardCornerRadius="20dp"
-    app:cardElevation="10dp"
-    app:cardBackgroundColor="#222222"
-    app:strokeColor="#FF5252"
-    app:strokeWidth="2dp">
+    style="@style/Widget.PeOb.Card.Dialog"
+    android:layout_width="@dimen/dialog_width"
+    android:layout_height="wrap_content">
 
   <LinearLayout
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:orientation="vertical"
-      android:padding="24dp"
-      android:gravity="center">
+      android:padding="@dimen/space_lg"
+      android:gravity="center_horizontal">
 
     <ImageView
-        android:layout_width="60dp"
-        android:layout_height="60dp"
-        android:src="@android:drawable/ic_dialog_alert"
-        app:tint="#FF5252"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:padding="16dp"
+        android:src="@drawable/ic_warning"
+        android:background="@drawable/bg_icon_circle"
+        android:backgroundTint="?attr/colorErrorContainer"
+        app:tint="?attr/colorError"
         android:contentDescription="Warning Icon" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="@dimen/space_md"
         android:text="장치 오류 감지"
-        android:textColor="#FFFFFF"
-        android:textSize="20sp"
+        android:textAppearance="?attr/textAppearanceTitleLarge"
+        android:textColor="?attr/colorOnSurface"
         android:textStyle="bold" />
 
     <TextView
         android:id="@+id/tvDialogMessage"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="@dimen/space_sm"
         android:text="모듈 장치에 문제가 발생했습니다.\n문제 해결 후 확인을 눌러주세요."
-        android:textColor="#CCCCCC"
-        android:textSize="15sp"
+        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:textColor="?attr/colorOnSurfaceVariant"
         android:gravity="center"
         android:lineSpacingExtra="4dp"/>
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnConfirm"
         android:layout_width="match_parent"
-        android:layout_height="50dp"
-        android:layout_marginTop="24dp"
+        android:layout_height="@dimen/button_height"
+        android:layout_marginTop="@dimen/space_lg"
         android:text="확인"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:textColor="#FFFFFF"
-        android:backgroundTint="#FF5252"
-        app:cornerRadius="12dp"/>
+        android:textColor="?attr/colorOnError"
+        app:backgroundTint="?attr/colorError"/>
 
   </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

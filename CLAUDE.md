@@ -12,9 +12,13 @@
 - 최종 목표: 스마트폰 앱에서 ML 모델이 여러 사용자의 페달 압력 데이터를 학습해,
   각자 운전 습관에 맞춰 경고 임계값이 가변되는 **개인화 오조작(급발진 오인) 감지**.
 - 데이터 흐름: STM32(FSR) → UART → ESP32-C3 → BLE NUS Notify → Android 앱
-  → `BleService`(RAW 디코드→윈도우 버퍼링) → Chaquopy `judge.py` 판정 → 경고.
+  → `BleService`(RAW 디코드→윈도우 버퍼링) → Chaquopy `peob.judge` 판정 → 경고.
 - 오조작 판단은 **전부 폰 로컬**. 펌웨어는 raw 센서값만 전달.
-- PC 프로토타입(`prototype/`)과 앱이 **같은 `judge.py`를 공유**한다(로직은 여기만 갈아끼움).
+- Python backend 원본은 `backend/`(`peob` 패키지) 하나뿐. 앱(Chaquopy srcDir)과 PC 도구(`prototype/`, uv 경로 의존성)가
+  **같은 코드를 공유**한다 — 복사본을 만들지 말 것. 테스트: `cd backend && uv run pytest`.
+- 임계값 학습(PC): `cd prototype && uv run python src/train_thresholds.py [데이터 디렉터리]` → `backend/src/peob/learned_thresholds.json`
+  (앱이 번들해 쓰는 배포물 — git 추적. `adopt: true`일 때만 앱 판정에 반영, 실험은 `--out`으로 다른 경로에).
+  테스트: `cd prototype && uv run pytest`.
 
 ## 관련 문서
 - `진행상황_및_로드맵.md` — 진행상황·로드맵(항상 최신 유지)

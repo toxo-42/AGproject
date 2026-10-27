@@ -1,0 +1,19 @@
+[project]
+name = "peob"
+version = "0.1.0"
+description = "PeOb backend — 페달 오조작 판정·캘리브레이션 (앱 Chaquopy + PC 도구 공용)"
+requires-python = ">=3.10"
+# 앱(Chaquopy)에 그대로 번들되므로 외부 의존성은 신중히 — 추가하면 Chaquopy 쪽 pip 설정도 함께 갱신.
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.8,<0.12"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

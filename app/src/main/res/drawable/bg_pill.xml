@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 알약 모양 배경(흰색). 색은 사용하는 곳에서 backgroundTint 로 지정 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+  <solid android:color="#FFFFFFFF" />
+  <corners android:radius="100dp" />
+</shape>

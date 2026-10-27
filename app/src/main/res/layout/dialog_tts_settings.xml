@@ -2,41 +2,38 @@
 <com.google.android.material.card.MaterialCardView
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="320dp"
-    android:layout_height="wrap_content"
-    app:cardBackgroundColor="@color/bg_dark"
-    app:cardCornerRadius="16dp"
-    app:strokeColor="@color/accent_blue"
-    app:strokeWidth="1dp">
+    style="@style/Widget.PeOb.Card.Dialog"
+    android:layout_width="@dimen/dialog_width"
+    android:layout_height="wrap_content">
 
   <LinearLayout
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:orientation="vertical"
-      android:padding="24dp">
+      android:padding="@dimen/space_lg">
 
     <TextView
         android:text="음성 안내 설정"
-        android:textColor="#FFFFFF"
-        android:textSize="20sp"
+        android:textAppearance="?attr/textAppearanceTitleLarge"
+        android:textColor="?attr/colorOnSurface"
         android:textStyle="bold"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="24dp"/>
+        android:layout_marginBottom="@dimen/space_lg"/>
 
     <TextView
         android:text="목소리 성별 선택"
-        android:textColor="#CCCCCC"
+        android:textAppearance="@style/TextAppearance.PeOb.FieldLabel"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="10dp"/>
+        android:layout_marginBottom="@dimen/space_sm"/>
 
     <RadioGroup
         android:id="@+id/rgGender"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:layout_marginBottom="24dp">
+        android:layout_marginBottom="@dimen/space_lg">
 
       <RadioButton
           android:id="@+id/rbFemale"
@@ -44,8 +41,8 @@
           android:layout_weight="1"
           android:layout_height="wrap_content"
           android:text="여성"
-          android:textColor="#FFFFFF"
-          android:buttonTint="#00E5FF"
+          android:textAppearance="?attr/textAppearanceBodyLarge"
+          android:textColor="?attr/colorOnSurface"
           android:checked="true"/>
 
       <RadioButton
@@ -54,11 +51,9 @@
           android:layout_weight="1"
           android:layout_height="wrap_content"
           android:text="남성"
-          android:textColor="#FFFFFF"
-          android:buttonTint="#00E5FF"/>
+          android:textAppearance="?attr/textAppearanceBodyLarge"
+          android:textColor="?attr/colorOnSurface"/>
     </RadioGroup>
-
-
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -67,22 +62,19 @@
 
       <com.google.android.material.button.MaterialButton
           android:id="@+id/btnTestTTS"
+          style="@style/Widget.PeOb.Button.Tonal"
           android:layout_width="0dp"
           android:layout_weight="1"
-          android:layout_height="wrap_content"
-          android:text="들어보기"
-          android:textColor="#000000"
-          android:backgroundTint="@color/accent_blue"
-          android:layout_marginEnd="8dp"/>
+          android:layout_height="@dimen/button_height"
+          android:layout_marginEnd="@dimen/space_sm"
+          android:text="들어보기"/>
 
       <com.google.android.material.button.MaterialButton
           android:id="@+id/btnClose"
           android:layout_width="0dp"
           android:layout_weight="1"
-          android:layout_height="wrap_content"
-          android:text="저장 &amp; 닫기"
-          android:textColor="#FFFFFF"
-          android:backgroundTint="#555555"/>
+          android:layout_height="@dimen/button_height"
+          android:text="저장 &amp; 닫기"/>
     </LinearLayout>
 
   </LinearLayout>

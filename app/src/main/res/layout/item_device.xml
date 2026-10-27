@@ -1,24 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
-                                   xmlns:app="http://schemas.android.com/apk/res-auto"
-                                   android:layout_width="match_parent"
-                                   android:layout_height="wrap_content"
-                                   android:layout_marginBottom="12dp"
-                                   app:cardBackgroundColor="@color/bg_card"
-                                   app:cardCornerRadius="12dp"
-                                   app:cardElevation="0dp">
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+                                                   xmlns:app="http://schemas.android.com/apk/res-auto"
+                                                   style="@style/Widget.PeOb.Card.Compact"
+                                                   android:layout_width="match_parent"
+                                                   android:layout_height="wrap_content"
+                                                   android:layout_marginBottom="@dimen/space_sm">
 
   <androidx.constraintlayout.widget.ConstraintLayout
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:padding="16dp">
+      android:padding="@dimen/space_md">
 
     <ImageView
         android:id="@+id/ivIcon"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:src="@android:drawable/stat_sys_data_bluetooth"
-        app:tint="@color/accent_blue"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:padding="10dp"
+        android:src="@drawable/ic_bluetooth"
+        android:background="@drawable/bg_icon_circle"
+        android:backgroundTint="?attr/colorSurfaceContainerHighest"
+        app:tint="?attr/colorPrimary"
         android:contentDescription="@string/desc_device_icon"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -26,24 +27,30 @@
 
     <TextView
         android:id="@+id/tvDeviceName"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
+        android:layout_marginStart="@dimen/space_md"
+        android:layout_marginEnd="@dimen/space_sm"
+        android:ellipsize="end"
+        android:maxLines="1"
         android:text="@string/unknown_device"
-        android:textColor="@color/text_white"
-        android:textSize="16sp"
+        android:textAppearance="?attr/textAppearanceTitleMedium"
+        android:textColor="?attr/colorOnSurface"
         android:textStyle="bold"
+        app:layout_constraintEnd_toStartOf="@id/tvConnectBtn"
         app:layout_constraintStart_toEndOf="@id/ivIcon"
         app:layout_constraintTop_toTopOf="@id/ivIcon" />
 
     <TextView
         android:id="@+id/tvMacAddress"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
+        android:layout_marginTop="2dp"
+        android:fontFamily="monospace"
         android:text="@string/default_mac"
-        android:textColor="@color/text_gray"
-        android:textSize="12sp"
+        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        app:layout_constraintEnd_toEndOf="@id/tvDeviceName"
         app:layout_constraintStart_toStartOf="@id/tvDeviceName"
         app:layout_constraintTop_toBottomOf="@id/tvDeviceName" />
 
@@ -51,12 +58,16 @@
         android:id="@+id/tvConnectBtn"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:background="@drawable/bg_pill_primary"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="6dp"
         android:text="@string/btn_connect"
-        android:textColor="@color/accent_blue"
+        android:textAppearance="?attr/textAppearanceLabelLarge"
+        android:textColor="?attr/colorOnPrimaryContainer"
         android:textStyle="bold"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
   </androidx.constraintlayout.widget.ConstraintLayout>
-</androidx.cardview.widget.CardView>
+</com.google.android.material.card.MaterialCardView>

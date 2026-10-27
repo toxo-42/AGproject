@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "trained_at": "2026-10-28T00:11:53",
+  "model": "nearest_centroid",
+  "chunk_min": 2.0,
+  "centroids": {
+    "beginner": {
+      "rel_rise": 0.29844651162790703,
+      "full_press_ratio": 0.31534090909090906,
+      "hold_sec": 1.6369949494949494,
+      "switch_sec": 1.5
+    },
+    "normal": {
+      "rel_rise": 0.34728778467908905,
+      "full_press_ratio": 0.4,
+      "hold_sec": 3.20625,
+      "switch_sec": 2.125
+    },
+    "aggressive": {
+      "rel_rise": 0.47287502352719746,
+      "full_press_ratio": 0.6666666666666666,
+      "hold_sec": 4.279761904761905,
+      "switch_sec": 0.875
+    }
+  },
+  "scale": {
+    "rel_rise": 0.1115,
+    "full_press_ratio": 0.1974,
+    "hold_sec": 1.4514,
+    "switch_sec": 0.5803
+  },
+  "chunks": {
+    "beginner": 10,
+    "normal": 10,
+    "aggressive": 10
+  },
+  "data": {
+    "sessions": 21,
+    "synthetic_sessions": 0
+  },
+  "validation": {
+    "leave_one_out_correct": 22,
+    "total": 30
+  }
+}
