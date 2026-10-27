@@ -1,21 +1,23 @@
 """페달 오조작 판정 — ★ 이 파일이 Chaquopy로 그대로 이식된다.
 
-계약(Contract):
-  입력  samples: list[[accel, brake], ...]   # Kotlin이 윈도우째로 넘김
-        profile: str                          # "strong" | "normal" | "weak"
-  출력  dict {"misop": bool, "score": float, "profile": str, "reason": str}
+계약(Contract) — 앱이 쓰는 경로(2026-09-24~):
+  new_detector(임계값 JSON) → MisopDetector  (주행 세션 하나 = 인스턴스 하나, Kotlin 이 PyObject 로 보관)
+  MisopDetector.step_json(윈도우 JSON) → {"misop", "trigger", "score", "rate", "armed", "consecutive", "fired", ...}
+    입력 윈도우: [[accel, brake], ...] (0.25초 = 50샘플)
+    임계값: {"accel_high", "brake_low", "high_ratio", "accel_rate_high"} — calibration/habit/learned 가 정한다.
+  코어는 judge_with_thresholds(윈도우 하나, 순수 함수) + MisopDetector(여러 윈도우에 걸친 상태기계).
+
+옛 경로(3단계 프로필, 2026-07-13 폐기): PROFILES / judge() / judge_json() 은 PC 데모(prototype/src/run.py)용으로만 남아 있다.
 
 Kotlin <-> Python 경계를 단순하게 유지하려고:
   - 입력은 중첩 리스트(기본 자료형)와 문자열만. numpy 객체를 인자로 받지 않는다.
-  - 출력은 JSON 직렬화 가능한 dict. (Chaquopy에선 judge_json 사용 권장)
+  - 출력은 JSON 직렬화 가능한 dict. (Chaquopy 경계에선 *_json 함수로 JSON 문자열을 주고받는다)
 
 개인화 구조:
-  '이 사람이 어느 프로필인가'를 정하는 일(프로필 판정)과 '지금 이 윈도우가
-  오조작인가'를 정하는 일(오조작 판정)을 분리한다. judge()는 후자만 한다.
-  프로필을 통계 규칙으로 정하든 학습된 분류기로 정하든 이 함수는 바뀌지 않는다.
+  '이 사람에게 맞는 임계값이 얼마인가'(calibration·habit·learned)와 '지금 이 윈도우가
+  오조작인가'(여기)를 분리한다. 임계값을 통계 규칙으로 정하든 학습으로 정하든 이 파일은 바뀌지 않는다.
 
-지금 판정 로직은 '예시 휴리스틱'이다. 실제 알고리즘은 여기만 갈아끼우면
-PC/앱 양쪽에 동시에 반영된다.
+판정 규칙을 바꾸면 PC 검증(prototype)과 앱에 동시에 반영된다 — 같은 파일을 공유하기 때문.
 """
 
 from __future__ import annotations

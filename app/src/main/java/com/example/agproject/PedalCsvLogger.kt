@@ -41,7 +41,7 @@ import java.util.Locale
 //     — 아래 label(수동)과는 독립적인, 실시간 감지 결과일 뿐이라는 점에 주의.
 //   - accel_high: 그 순간 적용 중인 임계값(캘리브레이션 전이면 기본값 calibration.DEFAULT_ACCEL_HIGH,
 //     2026-10-01 전 파일은 "none"). 패턴 파악 진행 중이면 "none".
-//   - accel_rate: judge_calibrated_json 이 계산한 그 윈도우의 "rate"(RATE_LAG_SAMPLES=50ms
+//   - accel_rate: 판정(judge.MisopDetector.step)이 계산한 그 윈도우의 "rate"(RATE_LAG_SAMPLES=50ms
 //     떨어진 두 샘플 간 엑셀 델타의 최댓값) — accel_rate_high(급조작 트리거 임계값)와 직접
 //     비교되는 값 그 자체. 판정 자체가 스킵된 윈도우(패턴 파악 중, 2026-10-01 전 파일은 캘리브레이션 전도)는 "none"
 //     (2026-07-18 사용자 요청 — accel_rate_high 실측 튜닝에 쓸 실제 값 분포를 보기 위함).
