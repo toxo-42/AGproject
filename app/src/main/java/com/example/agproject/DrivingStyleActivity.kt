@@ -78,7 +78,7 @@ class DrivingStyleActivity : AppCompatActivity() {
   private fun refresh() {
     val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
     val demo = CalibrationPrefs.isStyleDemo(prefs)
-    val report = BleService.liveStyleReportJson?.let { runCatching { JSONObject(it) }.getOrNull() }
+    val report = BleService.state.liveStyleReportJson?.let { runCatching { JSONObject(it) }.getOrNull() }
       ?: loadReport(CalibrationPrefs.styleState(prefs) ?: "", demo)
     if (report == null) {
       tvLabel.setText(R.string.style_no_reference)
@@ -102,7 +102,7 @@ class DrivingStyleActivity : AppCompatActivity() {
   // (안 그러면 1분 뒤 서비스가 이전 누적을 다시 저장해 되살아난다).
   private fun resetStyle() {
     CalibrationPrefs.clearStyleState(getSharedPreferences("AgPrefs", MODE_PRIVATE))
-    if (BleService.monitorState.isActive) {
+    if (BleService.state.monitor.isActive) {
       startService(android.content.Intent(this, BleService::class.java).apply { action = BleService.ACTION_RESET_STYLE })
     }
     android.widget.Toast.makeText(this, R.string.msg_reset_style_done, android.widget.Toast.LENGTH_SHORT).show()

@@ -37,7 +37,7 @@ class CriticalActivity : AppCompatActivity() {
   }
 
   private fun notifyCriticalShowing(showing: Boolean) {
-    if (!BleService.monitorState.isActive) return
+    if (!BleService.state.monitor.isActive) return
     startService(Intent(this, BleService::class.java).apply {
       action = BleService.ACTION_SET_CRITICAL_SHOWING
       putExtra(BleService.EXTRA_CRITICAL_SHOWING, showing)

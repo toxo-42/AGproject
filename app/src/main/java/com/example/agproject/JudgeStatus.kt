@@ -2,7 +2,7 @@ package com.example.agproject
 
 /**
  * 오조작 판정이 지금 실제로 돌고 있는지 — 연결 상태(MonitorState)와는 독립이다(재연결 중이면서 판정 오류일 수 있다).
- * 값은 BleService.judgeStatus 에서 읽고, 바뀔 때마다 BleService.ACTION_MONITOR_STATE 가 방송된다.
+ * 값은 BleService.state.judge 에서 읽고, 바뀔 때마다 BleService.ACTION_MONITOR_STATE 가 방송된다.
  *
  * 만든 이유: Python 판정 호출이 실패하면 경고가 하나도 안 뜨는데 화면은 "감시 중"으로 보였다(2026-10-28 분석).
  * 안전 기능이 조용히 꺼지는 게 가장 위험한 실패라, 꺼졌으면 화면·알림에 드러낸다.

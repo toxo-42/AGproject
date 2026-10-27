@@ -53,7 +53,7 @@ class MainActivity : AppCompatActivity() {
   private val statusReceiver = object : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
       when (intent?.action) {
-        // 감시 상태가 바뀔 때마다 BleService가 보냄 — 실제 값은 BleService.monitorState 에서 읽는다
+        // 감시·판정 상태가 바뀔 때마다 BleService가 보냄 — 실제 값은 BleService.state 에서 읽는다
         BleService.ACTION_MONITOR_STATE -> updateUI()
         // 습관 학습 n/100 실시간 갱신 — 감시 중이면 서비스 메모리의 최신값, 꺼졌으면 prefs 저장본
         BleService.ACTION_LEARNING_PROGRESS -> {
@@ -156,16 +156,17 @@ class MainActivity : AppCompatActivity() {
   }
 
   // --- 화면 갱신 ---
-  // 감시 상태는 BleService.monitorState(단일 출처)에서, 기기·캘리브레이션 정보는 prefs에서 읽어 그린다.
+  // 감시·판정 상태는 BleService.state(단일 출처)에서 한 번 읽고, 기기·캘리브레이션 정보는 prefs에서 읽어 그린다.
   private fun updateUI() {
-    val state = BleService.monitorState
+    val service = BleService.state
+    val state = service.monitor
     val hasDevice = targetAddress != null
 
     // 1. 상태 칩 (점 색 + 글자)
     val (statusText, dotAttr) = when {
       !hasDevice -> R.string.monitor_no_device to MaterialR.attr.colorOutline
       // 연결 상태와 무관하게 판정이 꺼졌으면 보호받지 못하는 상태 — 가장 먼저 드러낸다
-      state.isActive && BleService.judgeStatus == JudgeStatus.FAILED -> R.string.monitor_judge_failed to MaterialR.attr.colorError
+      state.isActive && service.judge == JudgeStatus.FAILED -> R.string.monitor_judge_failed to MaterialR.attr.colorError
       else -> when (state) {
         MonitorState.STOPPED -> R.string.monitor_stopped to MaterialR.attr.colorOutline
         MonitorState.CONNECTING -> R.string.monitor_connecting to MaterialR.attr.colorTertiary
@@ -234,7 +235,7 @@ class MainActivity : AppCompatActivity() {
     targetAddress = prefs.getString("TARGET_ADDRESS", null)
     targetName = prefs.getString("TARGET_NAME", "AG_Test_Module")
     isCalibrated = CalibrationPrefs.isPersonalized(prefs)
-    habitProgress = CalibrationPrefs.parseHabitProgress(BleService.liveHabitStateJson)
+    habitProgress = CalibrationPrefs.parseHabitProgress(BleService.state.liveHabitStateJson)
       ?: CalibrationPrefs.habitProgress(prefs)
   }
 

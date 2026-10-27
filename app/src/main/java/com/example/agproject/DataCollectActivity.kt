@@ -67,7 +67,7 @@ class DataCollectActivity : AppCompatActivity() {
         }
         // 습관 학습 게이트 도달·페르소나 변경 등으로 서비스가 적용한 임계값이 바뀌면 그래프도 따라간다
         BleService.ACTION_THRESHOLDS_CHANGED -> {
-          BleService.appliedThresholdsJson?.let(::applyThresholdsToGraph)
+          BleService.state.appliedThresholdsJson?.let(::applyThresholdsToGraph)
           updateJudgeStatus()
         }
         BleService.ACTION_MONITOR_STATE -> updateJudgeStatus()
@@ -184,7 +184,7 @@ class DataCollectActivity : AppCompatActivity() {
       val persona = Persona.fromId(group.findViewById<MaterialButton>(checkedId).tag as String)
       if (persona == CalibrationPrefs.currentPersona(prefs)) return@addOnButtonCheckedListener
       CalibrationPrefs.setCurrentPersona(prefs, persona)
-      if (BleService.monitorState.isActive) {
+      if (BleService.state.monitor.isActive) {
         startService(Intent(this, BleService::class.java).apply { action = BleService.ACTION_SET_PERSONA })
       }
       // 페르소나마다 임계값이 다르므로 그래프 임계선·제목·버튼도 새로 반영
@@ -283,14 +283,15 @@ class DataCollectActivity : AppCompatActivity() {
   // 페르소나 문구는 개발자가 골라 둔 경우에만 나온다(메인 화면 calibration_done 과 같은 기준).
   private fun updateJudgeStatus() {
     val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
-    val accelHigh = BleService.appliedThresholdsJson?.let {
+    val service = BleService.state
+    val accelHigh = service.appliedThresholdsJson?.let {
       try { JSONObject(it).getDouble("accel_high") } catch (e: Exception) { null }
     }
     val persona = CalibrationPrefs.currentPersona(prefs)
     val habit = CalibrationPrefs.habitProgress(prefs)
-    val judgeStatus = BleService.judgeStatus
+    val judgeStatus = service.judge
     val status = when {
-      !BleService.monitorState.isActive -> getString(R.string.judge_status_off)
+      !service.monitor.isActive -> getString(R.string.judge_status_off)
       // 임계값이 있어도 상태기계를 못 만들었거나 판정 호출이 계속 실패하면 판정 오류(JudgeStatus 참고)
       judgeStatus == JudgeStatus.FAILED -> getString(R.string.judge_status_failed)
       judgeStatus == JudgeStatus.CALIBRATING || accelHigh == null -> getString(R.string.judge_status_paused)
@@ -306,7 +307,7 @@ class DataCollectActivity : AppCompatActivity() {
 
   // "AI 학습 · 세션 20개 (10/01)". 합성 데이터 비율은 개발 맥락이라 dev mode 에서만 보인다.
   private fun learnedSummary(): String? {
-    val info = BleService.learnedInfoJson ?: return null
+    val info = BleService.state.learnedInfoJson ?: return null
     return try {
       val json = JSONObject(info)
       val sessions = json.getInt("sessions")
@@ -322,7 +323,7 @@ class DataCollectActivity : AppCompatActivity() {
   // 화면 진입 시 그래프 임계선을 맞춘다. 서비스가 판정 중이면 실제 적용값(습관 학습 반영)을 그대로 그리고,
   // 꺼져 있거나 패턴 파악 중이면 prefs 로 추정한다(없으면 PedalGraphView 기본값).
   private fun showExistingCalibration() {
-    BleService.appliedThresholdsJson?.let {
+    BleService.state.appliedThresholdsJson?.let {
       applyThresholdsToGraph(it)
       return
     }

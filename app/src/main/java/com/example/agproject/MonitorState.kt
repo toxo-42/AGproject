@@ -2,7 +2,7 @@ package com.example.agproject
 
 /**
  * 오조작 감시 서비스(BleService)의 현재 상태. 화면은 이 값만 보고 "지금 보호받고 있나"를 표시한다.
- * 값은 BleService.monitorState 에서 읽고, 바뀔 때마다 BleService.ACTION_MONITOR_STATE 가 방송된다.
+ * 값은 BleService.state.monitor 에서 읽고, 바뀔 때마다 BleService.ACTION_MONITOR_STATE 가 방송된다.
  */
 enum class MonitorState {
   /** 서비스 꺼짐 — 감시 안 함 */

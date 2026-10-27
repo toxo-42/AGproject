@@ -75,7 +75,7 @@ class PedalGraphView @JvmOverloads constructor(
   private val accelPath = Path()
   private val brakePath = Path()
 
-  /** 임계선 위치를 갱신한다 — 보통 서비스가 실제 적용 중인 임계값(BleService.appliedThresholdsJson)을 넘긴다. */
+  /** 임계선 위치를 갱신한다 — 보통 서비스가 실제 적용 중인 임계값(BleService.state.appliedThresholdsJson)을 넘긴다. */
   fun setThresholds(accelHigh: Double, brakeLow: Double) {
     this.accelHigh = accelHigh.toFloat()
     this.brakeLow = brakeLow.toFloat()

@@ -166,7 +166,7 @@ class TrialActivity : AppCompatActivity() {
 
   private fun startRun() {
     // 연결돼 데이터가 들어오는 중이어야 CSV 에 기록된다
-    if (BleService.monitorState != MonitorState.MONITORING) {
+    if (BleService.state.monitor != MonitorState.MONITORING) {
       Toast.makeText(this, R.string.trial_need_monitoring, Toast.LENGTH_LONG).show()
       return
     }

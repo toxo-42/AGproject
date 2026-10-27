@@ -132,50 +132,28 @@ class BleService : Service() {
   private var calibrationStartMs = 0L
 
   companion object {
-    /**
-     * 감시 상태 — 화면이 "지금 보호받고 있나"를 표시하는 단일 출처(MonitorState 참고).
-     * 전역 상태지만 쓰기는 이 서비스(setMonitorState)만 하고 밖에서는 읽기만 한다.
-     * prefs 가 아니라 메모리에 두는 이유: 프로세스가 죽으면 STOPPED 로 자동 초기화돼
-     * "꺼졌는데 감시 중으로 보이는" 낡은 값이 남지 않는다.
-     */
-    @Volatile var monitorState: MonitorState = MonitorState.STOPPED
+    /** 화면에 공개하는 상태 한 묶음(ServiceState 참고). 쓰기는 이 서비스의 updateState 만. */
+    @Volatile var state = ServiceState()
       private set
+    private val stateLock = Any()
+
+    /**
+     * 상태 묶음을 바꿔 끼우고 바뀌기 전 묶음을 돌려준다(호출하는 쪽이 "실제로 바뀌었나"를 비교해 방송 여부를 정한다).
+     * 메인 스레드와 BLE 콜백 스레드가 둘 다 쓰므로 읽고-고치고-쓰기를 잠금 안에서 한다 — 안 그러면 한쪽 변경이 사라진다.
+     * 잠금 안에서는 copy() 만 한다(방송·Python 호출은 밖에서) — BLE 흐름을 붙잡지 않고, 다른 잠금과 얽히지 않는다.
+     */
+    private fun updateState(change: (ServiceState) -> ServiceState): ServiceState = synchronized(stateLock) {
+      val before = state
+      state = change(before)
+      before
+    }
+
+    // 서비스 안에서 자주 읽는 두 값 — 예전 이름을 읽기 전용으로 남겨 BLE 콜백 등 호출부를 바꾸지 않는다.
+    private val monitorState: MonitorState get() = state.monitor
+    private val judgeStatus: JudgeStatus get() = state.judge
+
     const val ACTION_MONITOR_STATE = "ACTION_MONITOR_STATE"
-
-    /**
-     * 판정이 실제로 돌고 있는지(JudgeStatus 참고). monitorState 와 같은 규칙: 쓰기는 refreshJudgeStatus 만,
-     * 바뀌면 ACTION_MONITOR_STATE 방송. 서비스가 꺼져 있으면 의미 없다 — 화면은 monitorState.isActive 일 때만 본다.
-     */
-    @Volatile var judgeStatus: JudgeStatus = JudgeStatus.ACTIVE
-      private set
-
-    /**
-     * 지금 판정에 실제로 적용 중인 임계값 JSON — 화면(수집 그래프 임계선)이 그릴 단일 출처.
-     * 습관 학습·페르소나·캘리브레이션이 섞여 결정되므로 화면이 prefs 를 따로 읽어 재구성하면 어긋난다.
-     * monitorState 와 같은 규칙: 쓰기는 applyCalibratedThresholds 만, 바뀌면 ACTION_THRESHOLDS_CHANGED 방송.
-     * null = 서비스 꺼짐 또는 패턴 파악 중(판정 안 함).
-     */
-    @Volatile var appliedThresholdsJson: String? = null
-      private set
     const val ACTION_THRESHOLDS_CHANGED = "ACTION_THRESHOLDS_CHANGED"
-
-    /**
-     * 앱에 번들된 PC 학습 결과 요약(peob.learned.learned_info_json) — 채택된 학습값이 없으면 null.
-     * APK 에 고정된 값이라 서비스 시작 시 한 번 읽는다. 화면의 "AI 학습" 표시용.
-     */
-    @Volatile var learnedInfoJson: String? = null
-      private set
-
-    /**
-     * 학습 진행 실시간 표시용 — 서비스 메모리의 최신값(prefs 저장은 1분 주기라 화면이 그걸 읽으면 늦다).
-     * liveHabitStateJson = peob.habit HabitLearner.to_json(메인 "습관 학습 n/100"),
-     * liveStyleReportJson = peob.style StyleTracker.report_json(진단 화면이 그대로 그림).
-     * 엑셀 이벤트 수가 바뀔 때 갱신되고 ACTION_LEARNING_PROGRESS 를 방송한다. 서비스가 꺼지면 null → 화면은 prefs 저장본을 읽는다.
-     */
-    @Volatile var liveHabitStateJson: String? = null
-      private set
-    @Volatile var liveStyleReportJson: String? = null
-      private set
     const val ACTION_LEARNING_PROGRESS = "ACTION_LEARNING_PROGRESS"
     // 설정(데모 모드 등)이 바뀌어 진단 보고서를 지금 다시 계산해 달라는 요청 — 다음 이벤트까지 기다리지 않게
     const val ACTION_PUBLISH_PROGRESS = "ACTION_PUBLISH_PROGRESS"
@@ -276,13 +254,14 @@ class BleService : Service() {
     if (!Python.isStarted()) {
       Python.start(AndroidPlatform(this))
     }
-    learnedInfoJson = try {
+    val learnedInfo = try {
       Python.getInstance().getModule("peob.learned").callAttr("learned_info_json").toString().ifEmpty { null }
     } catch (e: Exception) {
       Log.e(tag, "학습 결과 읽기 실패: ${e.message}", e)
       null
     }
-    Log.i(tag, "번들된 학습 결과: ${learnedInfoJson ?: "없음(지금 규칙 사용)"}")
+    updateState { it.copy(learnedInfoJson = learnedInfo) }
+    Log.i(tag, "번들된 학습 결과: ${learnedInfo ?: "없음(지금 규칙 사용)"}")
   }
 
   @SuppressLint("ForegroundServiceType")
@@ -443,11 +422,12 @@ class BleService : Service() {
     speedTracker.stop()
     saveHabit()        // 주행 끝 — 마지막 1분치 누적도 남긴다
     saveStyle()
-    liveHabitStateJson = null   // 이제 화면은 방금 저장한 prefs 를 읽는다
-    liveStyleReportJson = null
+    // 실시간 학습 값을 비워 화면이 방금 저장한 prefs 를 읽게 하고, 판정 상태는 다음 감시가 이전 오류를 물려받지 않게 되돌린다
+    // (판정 상태 변화의 방송은 아래 STOPPED 가 한다)
+    updateState {
+      it.copy(liveHabitStateJson = null, liveStyleReportJson = null, appliedThresholdsJson = null, judge = JudgeStatus.ACTIVE)
+    }
     sendBroadcastToActivity(ACTION_LEARNING_PROGRESS)
-    appliedThresholdsJson = null
-    judgeStatus = JudgeStatus.ACTIVE   // 다음 감시가 이전 오류 상태를 물려받지 않게(방송은 아래 STOPPED 가 한다)
     pedalEdgeOverlay.detach()   // WRONG_DEVICE 로 끝나면 setMonitorState 를 거치지 않으므로 직접 뗀다
     // UUID 불일치로 스스로 종료한 경우엔 그 사실을 화면에 남겨 두려고 WRONG_DEVICE 유지
     if (monitorState != MonitorState.WRONG_DEVICE) setMonitorState(MonitorState.STOPPED)
@@ -709,8 +689,9 @@ class BleService : Service() {
       if (!force && habitEvents == publishedHabitEvents && styleEvents == publishedStyleEvents) return
       publishedHabitEvents = habitEvents
       publishedStyleEvents = styleEvents
-      liveHabitStateJson = habitLearner?.callAttr("to_json")?.toString()
-      liveStyleReportJson = styleTracker?.callAttr("report_json", CalibrationPrefs.isStyleDemo(agPrefs()))?.toString()
+      val habitJson = habitLearner?.callAttr("to_json")?.toString()
+      val styleJson = styleTracker?.callAttr("report_json", CalibrationPrefs.isStyleDemo(agPrefs()))?.toString()
+      updateState { it.copy(liveHabitStateJson = habitJson, liveStyleReportJson = styleJson) }
       sendBroadcastToActivity(ACTION_LEARNING_PROGRESS)
     } catch (e: Exception) {
       Log.e(tag, "학습 진행 공개 실패: ${e.message}", e)
@@ -763,7 +744,7 @@ class BleService : Service() {
       null
     }
     consecutiveJudgeFailures = 0
-    appliedThresholdsJson = json
+    updateState { it.copy(appliedThresholdsJson = json) }
     sendBroadcastToActivity(ACTION_THRESHOLDS_CHANGED)
     refreshJudgeStatus()
   }
@@ -772,9 +753,9 @@ class BleService : Service() {
   // (감시 시작 전에 이미 오류였던 경우는 onStartCommand 가 감시 상태로 들어간 뒤 직접 알린다).
   private fun refreshJudgeStatus() {
     val status = JudgeStatus.of(isCalibrating, detector != null, consecutiveJudgeFailures)
-    if (status == judgeStatus) return
-    val wasFailed = judgeStatus == JudgeStatus.FAILED
-    judgeStatus = status
+    val before = updateState { it.copy(judge = status) }
+    if (before.judge == status) return
+    val wasFailed = before.judge == JudgeStatus.FAILED
     Log.i(tag, "판정 상태: $status")
     if (monitorState.isActive) announceJudgeStatus(wasFailed)
     sendBroadcastToActivity(ACTION_MONITOR_STATE)
@@ -1074,11 +1055,11 @@ class BleService : Service() {
     prefs.edit().putString("CONNECTION_STATUS", statusMsg).apply()
   }
 
-  // 상태가 실제로 바뀔 때만 방송한다. BLE 콜백 스레드에서도 불린다(@Volatile).
-  private fun setMonitorState(state: MonitorState) {
-    if (monitorState == state) return
-    monitorState = state
-    Log.i(tag, "감시 상태: $state")
+  // 상태가 실제로 바뀔 때만 방송한다. BLE 콜백 스레드에서도 불린다(비교와 교체는 updateState 잠금 안에서 한 번에).
+  private fun setMonitorState(next: MonitorState) {
+    val before = updateState { it.copy(monitor = next) }
+    if (before.monitor == next) return
+    Log.i(tag, "감시 상태: $next")
     updatePedalEdgeOverlay()
     sendBroadcastToActivity(ACTION_MONITOR_STATE)
   }

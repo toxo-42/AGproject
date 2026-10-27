@@ -146,7 +146,7 @@ class DeviceManagerActivity : AppCompatActivity() {
     swPedalEdge.isChecked = prefs.getBoolean(BleService.PREF_PEDAL_EDGE_ENABLED, true)
     swPedalEdge.setOnCheckedChangeListener { _, checked ->
       prefs.edit().putBoolean(BleService.PREF_PEDAL_EDGE_ENABLED, checked).apply()
-      if (BleService.monitorState.isActive) {
+      if (BleService.state.monitor.isActive) {
         startService(Intent(this, BleService::class.java).apply { action = BleService.ACTION_SET_PEDAL_EDGE })
       }
       // 켰는데 오버레이 권한이 없으면 테두리가 안 보인다 — 권한 화면으로 안내
@@ -181,7 +181,7 @@ class DeviceManagerActivity : AppCompatActivity() {
     swStyleDemo.setOnCheckedChangeListener { _, checked ->
       CalibrationPrefs.setStyleDemo(prefs, checked)
       // 감시 중이면 진단 보고서(최소 데이터 기준)를 바로 다시 계산하게 알린다
-      if (BleService.monitorState.isActive) {
+      if (BleService.state.monitor.isActive) {
         startService(Intent(this, BleService::class.java).apply { action = BleService.ACTION_PUBLISH_PROGRESS })
       }
     }

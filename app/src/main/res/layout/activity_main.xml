@@ -32,7 +32,7 @@
         app:layout_constraintStart_toStartOf="parent" />
 
     <!-- 현재 대상 기기 카드. 상태 칩·테두리·보조 문구는 MainActivity.updateUI()가
-         BleService.monitorState 와 캘리브레이션 여부에 따라 바꾼다 -->
+         BleService.state.monitor 와 캘리브레이션 여부에 따라 바꾼다 -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/cardCurrentTarget"
         android:layout_width="0dp"
