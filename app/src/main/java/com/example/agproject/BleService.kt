@@ -169,6 +169,9 @@ class BleService : Service() {
   // 안전 판정과 분리된 진단용. 습관 학습과 같은 규칙으로 사용자 본인 주행만 누적·저장한다(진단 화면이 prefs 에서 읽음).
   @Volatile private var styleTracker: PyObject? = null
   private var lastStyleSaveMs = 0L
+  // publishLearningProgress 가 직전에 공개한 이벤트 수 — 바뀌었을 때만 다시 계산·방송한다(윈도우 4Hz 마다 하면 낭비)
+  private var publishedHabitEvents = -1
+  private var publishedStyleEvents = -1
 
   // ── 연속형 개인화 캘리브레이션 상태 ──────────────────────────────
   // 계산된 임계값이 있으면(null 이 아니면) judgeWindow 가 profile 대신 이걸 쓴다.
@@ -213,6 +216,20 @@ class BleService : Service() {
      */
     @Volatile var learnedInfoJson: String? = null
       private set
+
+    /**
+     * 학습 진행 실시간 표시용 — 서비스 메모리의 최신값(prefs 저장은 1분 주기라 화면이 그걸 읽으면 늦다).
+     * liveHabitStateJson = peob.habit HabitLearner.to_json(메인 "습관 학습 n/100"),
+     * liveStyleReportJson = peob.style StyleTracker.report_json(진단 화면이 그대로 그림).
+     * 엑셀 이벤트 수가 바뀔 때 갱신되고 ACTION_LEARNING_PROGRESS 를 방송한다. 서비스가 꺼지면 null → 화면은 prefs 저장본을 읽는다.
+     */
+    @Volatile var liveHabitStateJson: String? = null
+      private set
+    @Volatile var liveStyleReportJson: String? = null
+      private set
+    const val ACTION_LEARNING_PROGRESS = "ACTION_LEARNING_PROGRESS"
+    // 설정(데모 모드 등)이 바뀌어 진단 보고서를 지금 다시 계산해 달라는 요청 — 다음 이벤트까지 기다리지 않게
+    const val ACTION_PUBLISH_PROGRESS = "ACTION_PUBLISH_PROGRESS"
 
     // Nordic UART Service (NUS) 표준 UUID
     private val NUS_SERVICE = UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
@@ -380,22 +397,30 @@ class BleService : Service() {
       return START_NOT_STICKY
     }
 
-    // 캘리브레이션 초기화 — 삭제 후 재설치한 것처럼 되돌린다. 판정은 끄지 않고 기본 임계값으로 돌아간다
-    // (페르소나를 골라 둔 상태면 그 프리셋 유지 — 예전엔 페르소나까지 무시하고 판정을 꺼서 수집 데이터가 날아갔다).
-    // 메모리의 누적기도 비워야 한다 — prefs 만 지우면 1분 뒤 saveStyle 이 이전 누적을 다시 써서 되살아난다.
+    // 설정(데모 모드 등)이 바뀌었다 — 다음 엑셀 이벤트까지 기다리지 않고 진단 보고서를 지금 다시 계산해 공개한다.
+    if (intent?.action == ACTION_PUBLISH_PROGRESS) {
+      publishLearningProgress(force = true)
+      return START_NOT_STICKY
+    }
+
+    // 운전 성향 누적 초기화. 메모리의 누적기도 비워야 한다 — prefs 만 지우면 1분 뒤 saveStyle 이 이전 누적을 다시 써서 되살아난다.
     if (intent?.action == ACTION_RESET_STYLE) {
       CalibrationPrefs.clearStyleState(agPrefs())
       styleTracker = loadStyleTracker()
+      publishLearningProgress(force = true)
       Log.i(tag, "운전 성향 누적 초기화")
       return START_NOT_STICKY
     }
 
+    // 캘리브레이션 초기화 — 삭제 후 재설치한 것처럼 되돌린다. 판정은 끄지 않고 기본 임계값으로 돌아간다
+    // (페르소나를 골라 둔 상태면 그 프리셋 유지 — 예전엔 페르소나까지 무시하고 판정을 꺼서 수집 데이터가 날아갔다).
     if (intent?.action == ACTION_CLEAR_CALIBRATION) {
       CalibrationPrefs.clearUserCalibration(agPrefs())
       // 습관 학습도 처음부터 — 초기화는 "개인화를 전부 되돌린다"는 뜻
       CalibrationPrefs.clearHabitState(agPrefs())
       habitLearner = loadHabitLearner()
       applyCalibratedThresholds(readCalibratedThresholds())
+      publishLearningProgress(force = true)
       Log.i(tag, "캘리브레이션 초기화 — 기본 임계값으로 복귀: $calibratedThresholdsJson")
       return START_NOT_STICKY
     }
@@ -415,6 +440,7 @@ class BleService : Service() {
     // 습관 학습값이 있으면 accel_high 는 그걸로(주행 시작 시점 적용). 서비스가 이미 떠 있으면 누적 상태를 이어간다.
     if (habitLearner == null) habitLearner = loadHabitLearner()
     if (styleTracker == null) styleTracker = loadStyleTracker()
+    publishLearningProgress(force = true)
     currentPersona = CalibrationPrefs.currentPersona(agPrefs())
     applyCalibratedThresholds(readCalibratedThresholds())
     Log.i(tag, "판정 임계값: $calibratedThresholdsJson")
@@ -464,6 +490,9 @@ class BleService : Service() {
     speedTracker.stop()
     saveHabit()        // 주행 끝 — 마지막 1분치 누적도 남긴다
     saveStyle()
+    liveHabitStateJson = null   // 이제 화면은 방금 저장한 prefs 를 읽는다
+    liveStyleReportJson = null
+    sendBroadcastToActivity(ACTION_LEARNING_PROGRESS)
     appliedThresholdsJson = null
     pedalEdgeOverlay.detach()   // WRONG_DEVICE 로 끝나면 setMonitorState 를 거치지 않으므로 직접 뗀다
     // UUID 불일치로 스스로 종료한 경우엔 그 사실을 화면에 남겨 두려고 WRONG_DEVICE 유지
@@ -737,6 +766,25 @@ class BleService : Service() {
     }
   }
 
+  // 학습 진행을 화면에 실시간으로 공개한다. 이벤트 수가 그대로면 아무것도 안 한다(force 면 무조건).
+  // 진단 보고서는 지금 데모 모드 설정 기준으로 서비스가 계산한다 — 화면은 Python 누적기를 직접 건드리지 않는다.
+  // 평소엔 BLE 콜백 스레드에서 불리지만 force 호출(onStartCommand)은 메인 스레드라 add_window 와 겹칠 수 있다
+  // — 읽기만 하는 계산이라 GIL 아래에서 깨지지 않고, 실패해도 다음 이벤트에 다시 공개된다.
+  private fun publishLearningProgress(force: Boolean = false) {
+    try {
+      val habitEvents = habitLearner?.get("events")?.toInt() ?: -1
+      val styleEvents = styleTracker?.get("events")?.callAttr("__len__")?.toInt() ?: -1
+      if (!force && habitEvents == publishedHabitEvents && styleEvents == publishedStyleEvents) return
+      publishedHabitEvents = habitEvents
+      publishedStyleEvents = styleEvents
+      liveHabitStateJson = habitLearner?.callAttr("to_json")?.toString()
+      liveStyleReportJson = styleTracker?.callAttr("report_json", CalibrationPrefs.isStyleDemo(agPrefs()))?.toString()
+      sendBroadcastToActivity(ACTION_LEARNING_PROGRESS)
+    } catch (e: Exception) {
+      Log.e(tag, "학습 진행 공개 실패: ${e.message}", e)
+    }
+  }
+
   private fun saveStyle() {
     val tracker = styleTracker ?: return
     if (agPrefs().getString("TARGET_ADDRESS", null) == null) return   // saveHabit 과 같은 이유(기기 해제 직후)
@@ -995,6 +1043,7 @@ class BleService : Service() {
       val accelMedian = sortedAccels[sortedAccels.size / 2]
       learnHabit(accelMedian, judged, nowMs)
       learnStyle(accelMedian, last[1], judged, nowMs)
+      publishLearningProgress()
       writeRawCsv(nowMs, accel = last[0], brake = last[1], accelMedian = accelMedian, label = currentLabel, judged = judged)
       flushRawCsv()
     }

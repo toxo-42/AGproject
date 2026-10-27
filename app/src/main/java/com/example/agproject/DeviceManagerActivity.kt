@@ -178,7 +178,13 @@ class DeviceManagerActivity : AppCompatActivity() {
     val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
     val swStyleDemo = dialogView.findViewById<MaterialSwitch>(R.id.swStyleDemo)
     swStyleDemo.isChecked = CalibrationPrefs.isStyleDemo(prefs)
-    swStyleDemo.setOnCheckedChangeListener { _, checked -> CalibrationPrefs.setStyleDemo(prefs, checked) }
+    swStyleDemo.setOnCheckedChangeListener { _, checked ->
+      CalibrationPrefs.setStyleDemo(prefs, checked)
+      // 감시 중이면 진단 보고서(최소 데이터 기준)를 바로 다시 계산하게 알린다
+      if (BleService.monitorState.isActive) {
+        startService(Intent(this, BleService::class.java).apply { action = BleService.ACTION_PUBLISH_PROGRESS })
+      }
+    }
 
     dialogView.findViewById<Button>(R.id.btnCloseDevSettings).setOnClickListener { dialog.dismiss() }
     dialog.show()

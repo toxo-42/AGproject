@@ -55,6 +55,11 @@ class MainActivity : AppCompatActivity() {
       when (intent?.action) {
         // 감시 상태가 바뀔 때마다 BleService가 보냄 — 실제 값은 BleService.monitorState 에서 읽는다
         BleService.ACTION_MONITOR_STATE -> updateUI()
+        // 습관 학습 n/100 실시간 갱신 — 감시 중이면 서비스 메모리의 최신값, 꺼졌으면 prefs 저장본
+        BleService.ACTION_LEARNING_PROGRESS -> {
+          loadSavedData()
+          updateUI()
+        }
         "ACTION_UUID_MATCHED" -> maybeShowCalibrationOnboarding()
         "ACTION_MODULE_ERROR" ->{
          showErrorPopup()// 팝업 띄우는 함수 실행
@@ -126,6 +131,7 @@ class MainActivity : AppCompatActivity() {
     // 라디오 켜기 (방송 수신 등록)
     val filter = android.content.IntentFilter().apply {
       addAction(BleService.ACTION_MONITOR_STATE)
+      addAction(BleService.ACTION_LEARNING_PROGRESS)
       addAction("ACTION_UUID_MATCHED")
       addAction("ACTION_MODULE_ERROR")
       addAction("ACTION_SD_CARD_WARNING")
@@ -226,7 +232,8 @@ class MainActivity : AppCompatActivity() {
     targetAddress = prefs.getString("TARGET_ADDRESS", null)
     targetName = prefs.getString("TARGET_NAME", "AG_Test_Module")
     isCalibrated = CalibrationPrefs.isPersonalized(prefs)
-    habitProgress = CalibrationPrefs.habitProgress(prefs)
+    habitProgress = CalibrationPrefs.parseHabitProgress(BleService.liveHabitStateJson)
+      ?: CalibrationPrefs.habitProgress(prefs)
   }
 
   private fun startSystem() {

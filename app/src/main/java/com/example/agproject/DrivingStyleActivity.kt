@@ -1,11 +1,17 @@
 package com.example.agproject
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.google.android.material.progressindicator.LinearProgressIndicator
@@ -15,9 +21,9 @@ import java.util.Locale
 /**
  * 운전 성향 진단 화면 (Phase F-4, 설정 → 운전 성향 진단).
  *
- * BleService 가 주행 중 누적해 prefs 에 저장한 성향 상태(peob.style.StyleTracker)를 읽어
- * Python 보고서(report_json)를 그대로 그린다 — 지표 계산·진단은 전부 Python, 여기선 표시만.
- * 상태 저장은 1분 주기라 주행 중이면 최대 1분 늦은 값이 보인다.
+ * 감시 중이면 BleService 가 엑셀 이벤트마다 공개하는 최신 보고서(liveStyleReportJson)를 실시간으로 그리고
+ * (ACTION_LEARNING_PROGRESS 수신), 꺼져 있으면 prefs 에 저장된 성향 상태로 Python 보고서(report_json)를 만든다.
+ * 지표 계산·진단은 전부 Python, 여기선 표시만.
  * 안전 판정과 분리된 기능이다(진단 결과는 경고에 쓰이지 않는다).
  */
 class DrivingStyleActivity : AppCompatActivity() {
@@ -43,15 +49,37 @@ class DrivingStyleActivity : AppCompatActivity() {
     findViewById<View>(R.id.btnResetStyle).setOnClickListener { confirmReset() }
   }
 
+  private val progressReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      if (intent?.action == BleService.ACTION_LEARNING_PROGRESS) refresh()
+    }
+  }
+
   override fun onResume() {
     super.onResume()
+    val filter = IntentFilter(BleService.ACTION_LEARNING_PROGRESS)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      registerReceiver(progressReceiver, filter, RECEIVER_NOT_EXPORTED)
+    } else {
+      ContextCompat.registerReceiver(this, progressReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
     refresh()
+  }
+
+  override fun onPause() {
+    super.onPause()
+    try {
+      unregisterReceiver(progressReceiver)
+    } catch (_: IllegalArgumentException) {
+      // 이미 해제됨
+    }
   }
 
   private fun refresh() {
     val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
     val demo = CalibrationPrefs.isStyleDemo(prefs)
-    val report = loadReport(CalibrationPrefs.styleState(prefs) ?: "", demo)
+    val report = BleService.liveStyleReportJson?.let { runCatching { JSONObject(it) }.getOrNull() }
+      ?: loadReport(CalibrationPrefs.styleState(prefs) ?: "", demo)
     if (report == null) {
       tvLabel.setText(R.string.style_no_reference)
       return

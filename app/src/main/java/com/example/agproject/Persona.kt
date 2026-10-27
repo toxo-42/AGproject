@@ -83,8 +83,11 @@ object CalibrationPrefs {
   }
 
   /** 화면 표시용 습관 학습 진행도("습관 학습 중 N/100"). 학습 기록이 없으면 null. */
-  fun habitProgress(prefs: SharedPreferences): HabitProgress? {
-    val json = habitState(prefs) ?: return null
+  fun habitProgress(prefs: SharedPreferences): HabitProgress? = parseHabitProgress(habitState(prefs))
+
+  /** HabitLearner.to_json 문자열 → 진행도. 서비스의 실시간 값(BleService.liveHabitStateJson)에도 쓴다. */
+  fun parseHabitProgress(json: String?): HabitProgress? {
+    if (json == null) return null
     return try {
       JSONObject(json).let { HabitProgress(it.getInt("events"), it.getInt("gate"), it.getBoolean("ready")) }
     } catch (e: Exception) {
