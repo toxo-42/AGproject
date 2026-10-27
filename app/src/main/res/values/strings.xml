@@ -125,6 +125,7 @@
   <string name="btn_calibrate">브레이크 영점 조절</string>
   <string name="btn_calibrate_running">영점 조절 중… 발을 떼세요 %1$d초</string>
   <string name="msg_calibration_done">브레이크 영점 조절 완료: 브레이크 기준 %1$.2f</string>
+  <string name="msg_calibration_needs_monitoring">기기가 연결돼 감시 중일 때만 영점 조절을 할 수 있습니다</string>
   <string name="desc_reset_calibration">학습 초기화</string>
   <string name="title_reset_calibration_confirm">학습을 초기화할까요?</string>
   <string name="msg_reset_calibration_confirm">브레이크 영점과 지금까지 학습한 운전 습관이 모두 삭제되고, 다시 학습될 때까지 기본값으로 오조작을 감지합니다.</string>

@@ -322,7 +322,13 @@ class BleService : Service() {
     }
 
     // 패턴 파악(연속형 캘리브레이션) 시작. 이미 감시 중인 세션에 바로 적용되며 재연결이 필요 없다.
+    // 감시 중(MONITORING)이 아니면 시작하지 않는다 — 종료 판정이 데이터 도착에 묶여 있어 데이터 없이 시작하면 끝나지 않고,
+    // 그 상태로 다음 감시가 시작되면 연결 직후 첫 배치(샘플 몇 개)로 엉뚱한 영점이 저장됐다(2026-10-28 발견).
     if (intent?.action == ACTION_START_CALIBRATION) {
+      if (monitorState != MonitorState.MONITORING) {
+        Log.w(tag, "감시 중이 아니라 영점 조절 요청 무시: $monitorState")
+        return START_NOT_STICKY
+      }
       startCalibration()
       return START_NOT_STICKY
     }

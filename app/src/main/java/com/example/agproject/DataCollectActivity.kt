@@ -216,6 +216,11 @@ class DataCollectActivity : AppCompatActivity() {
   // --- 브레이크 영점 조절(옛 "패턴 파악") ---
 
   private fun startCalibrationFlow() {
+    // 서비스도 감시 중이 아니면 요청을 무시한다(BleService ACTION_START_CALIBRATION 참고) — 여기선 카운트다운을 띄우지 않고 이유를 알린다
+    if (BleService.state.monitor != MonitorState.MONITORING) {
+      Toast.makeText(this, R.string.msg_calibration_needs_monitoring, Toast.LENGTH_LONG).show()
+      return
+    }
     startService(Intent(this, BleService::class.java).apply {
       action = BleService.ACTION_START_CALIBRATION
     })
