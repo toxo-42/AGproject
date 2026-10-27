@@ -1,10 +1,6 @@
 package com.example.agproject
 
 import android.annotation.SuppressLint
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.*
 import android.bluetooth.le.*
@@ -12,7 +8,6 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import com.chaquo.python.PyObject
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
@@ -23,7 +18,7 @@ import java.util.*
 
 class BleService : Service() {
 
-  private val channelId = "BleCriticalChannel_v2"
+  private lateinit var alerts: SafetyAlerts   // 알림·음성·전체화면 경고 출력
   private val tag = "BleService"
   private var targetAddress: String? = null
 
@@ -65,63 +60,8 @@ class BleService : Service() {
   )
 
   // ── RAW 원시 샘플 CSV 로깅 (Phase A/E: 학습 데이터 + 증거자료) ──────────
-  // 첫 윈도우가 찰 때 lazy 로 세션 파일을 연다(연결 실패 시 빈 파일 안 남김).
-  // 저장 위치: filesDir/logs/pedal_yyyyMMdd_HHmmss.csv (권한 불필요, adb pull 로 회수)
-  // 컬럼: date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,
-  //        consecutive,label,persona,trial_id,trial_type,trial_phase,accel_median,speed_kmh,speed_acc_kmh,purpose
-  //   (2026-07-17 accel_exceed 제거 + label→accel_high 교체 / 2026-07-18 label 재도입,
-  //   accel_rate 추가, accel_score/armed/consecutive 추가(긴 홀드 오조작 미탐지 원인 진단용,
-  //   §진행상황_및_로드맵.md 참고) / 2026-09-25 style(강/보통/약) → persona(Persona.id, 미선택 "none") 교체
-  //   — 옛 CSV의 strong/normal/weak 는 각각 aggressive/normal/beginner 에 대응)
-  //   / 2026-09-25 trial_id,trial_type,trial_phase 추가(안내형 재현 실험 — Trial.kt, 실험 밖이면 "none")
-  //   / 2026-09-26 accel_median 추가(윈도우 엑셀 중앙값 — accel 은 마지막 샘플 하나라 판정의 "윈도우 50% 이상
-  //   초과"와 어긋난다. 중앙값 >= 임계값이면 정확히 그 조건과 같아서 임계값 학습에 쓴다, prototype/train_thresholds.py)
-  //   / 2026-10-25 speed_kmh,speed_acc_kmh 추가(GPS 차량 속도와 그 오차 — 운전 성향 진단 Phase F-2, SpeedTracker.kt.
-  //   GPS 는 1Hz 라 4Hz 행에선 같은 값이 반복된다. 권한 없음/fix 없음/3초 이상 끊김이면 "none". 좌표는 안 남긴다)
-  //   / 2026-10-28 purpose 추가("demo"/"train" — 개발자 설정 데모(시연) 모드가 켜진 동안의 행은 "demo".
-  //   PC 학습(prototype/src/dataset.py)이 demo 행을 빼서 시연 주행이 학습 데이터에 섞이지 않게 한다)
-  //   - 기록 주기는 200Hz 원시 샘플 전부가 아니라 **판정 윈도우 하나당 1행(4Hz)**이다.
-  //     pedal_err/accel_high 가 애초에 4Hz 단위라 200Hz로 찍어도 값이 반복될 뿐이고,
-  //     증거자료로서 사람이 열어볼 수 있는 크기가 더 중요하다고 판단(2026-07-13 사용자 결정,
-  //     처음엔 200Hz 전부 남겼다가 "초당 데이터가 너무 많다"는 피드백으로 축소).
-  //     brake/accel 은 그 윈도우의 마지막 샘플 값을 대표값으로 쓴다.
-  //   - date/time: 사람이 읽을 수 있는 형식(원시 epoch 대신).
-  //   - module_err: 그 순간 미해결 장치 오류가 있었는지("module_err"/"none",
-  //     isErrorDialogShowing 그대로). 0/1 대신 문자열로 남겨 바로 알아볼 수 있게 함(2026-07-13).
-  //   - pedal_err: onPedalMisoperation() 이 실제로 발동한 그 윈도우 한 행만 "pedal_err",
-  //     나머지는 "none"(2026-07-17 사용자 결정). 예전엔 misop 레벨 조건이 유지되는 매 윈도우마다
-  //     찍었는데, judge.py 에 변화율(미분) 트리거가 추가되면서 "완만하게 계속 깊게 밟는 상태"와
-  //     "실제로 경고가 뜬 사건"이 달라졌다 — 후자만 남겨야 증거자료로서 의미가 있다.
-  //     JudgeResult.fired 로 판정한다. ⚠️ 알고리즘이 자동으로 트리거한 것이라
-  //     패턴 파악 진행 중이면 judgeWindow 가 판정 자체를 건너뛰어 항상 "none"이다
-  //     — 아래 label(수동)과는 독립적인, 실시간 감지 결과일 뿐이라는 점에 주의.
-  //   - accel_high: 그 순간 적용 중인 임계값(캘리브레이션 전이면 기본값 calibration.DEFAULT_ACCEL_HIGH,
-  //     2026-10-01 전 파일은 "none"). 패턴 파악 진행 중이면 "none".
-  //   - accel_rate: judge_calibrated_json 이 계산한 그 윈도우의 "rate"(RATE_LAG_SAMPLES=50ms
-  //     떨어진 두 샘플 간 엑셀 델타의 최댓값) — accel_rate_high(급조작 트리거 임계값)와 직접
-  //     비교되는 값 그 자체. 판정 자체가 스킵된 윈도우(패턴 파악 중, 2026-10-01 전 파일은 캘리브레이션 전도)는 "none"
-  //     (2026-07-18 사용자 요청 — accel_rate_high 실측 튜닝에 쓸 실제 값 분포를 보기 위함).
-  //   - accel_score: 그 윈도우의 "score"(레벨 조건 hits 비율) — high_ratio와 직접 비교되는
-  //     값. 스킵된 윈도우는 "none".
-  //   - armed: judgeWindow() 처리 후 그 시점의 무장 상태(judge.MisopDetector). 스킵된 윈도우는
-  //     "none"(2026-09-24 상태기계 Python 이관 후 — 패턴 파악 중엔 detector 자체가 없다).
-  //   - consecutive: 그 시점의 연속 misop 윈도우 카운트. 스킵된 윈도우는 "none".
-  //     accel_score/armed/consecutive 셋 다 "긴 홀드형 오조작 재현이 왜 반복적으로 안 잡히는지"
-  //     진단용으로 추가(2026-07-18) — 로그캣 없이 CSV만으로 무장이 언제 풀렸는지 재구성 가능.
-  //   - label: 수동 오조작 라벨링(개발자용 지도학습 정답, Phase A, 0=정상/1=오조작 재현).
-  //     2026-07-17에 "실주행에서 항상 0으로만 찍힌다"는 이유로 accel_high로 교체하며 없앴는데,
-  //     의도적으로 오조작을 재현하며 라벨을 남기는 세션(바로 이 currentLabel 자체가 그 정답)에서는
-  //     그 판단이 틀렸다 — 라벨 누른 시점이 CSV 어디에도 안 남아서 지도학습 데이터가 통째로
-  //     유실됐다(2026-07-18 사용자 피드백). accel_high 는 그대로 두고 label 을 별도 컬럼으로 복원.
-  //   - style: 개발자 전용 강/보통/약 스타일 라벨(그대로 유지).
-  //
-  // BLE notify 콜백은 여러 바인더 스레드에서 올라온다 → BufferedWriter 접근은 전부 csvLock 아래에서.
-  // csvClosed 는 종료 후 뒤늦게 도착한 콜백이 새 세션 파일을 되살리는 것을 막는다.
-  private val csvLock = Any()
-  private var csvWriter: java.io.BufferedWriter? = null
-  private var csvClosed = false
-  private val csvDateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
-  private val csvTimeFormat = java.text.SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+  // 파일·형식·잠금은 PedalCsvLogger(컬럼 의미·변경 이력도 거기). 여기선 한 행의 값만 모아 넘긴다(writeRawCsv).
+  private lateinit var csvLogger: PedalCsvLogger
 
   // ── 라벨링 (Phase A: 지도학습용 정답 수집) ────────────────────────
   // 개발자 재현 실험 화면(TrialActivity)이 ACTION_SET_TRIAL 로 구간마다 갱신한다(수동 토글은 2026-09-25 대체).
@@ -322,8 +262,10 @@ class BleService : Service() {
 
   override fun onCreate() {
     super.onCreate()
-    createNotificationChannel()
+    alerts = SafetyAlerts(this)
+    alerts.createChannel()
     pedalEdgeOverlay = PedalEdgeOverlay(this)
+    csvLogger = PedalCsvLogger(java.io.File(filesDir, "logs"))
     speedTracker = SpeedTracker(this)
     pedalEdgeEnabled = agPrefs().getBoolean(PREF_PEDAL_EDGE_ENABLED, true)
     val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
@@ -497,7 +439,7 @@ class BleService : Service() {
   override fun onDestroy() {
     // 순서 중요: GATT 를 먼저 끊어야 뒤늦은 notify 콜백이 세션 파일을 되살리지 않는다.
     disconnectGatt()
-    closeCsvWriter()   // 세션 로그 파일 flush + close
+    csvLogger.close()   // 세션 로그 파일 flush + close
     speedTracker.stop()
     saveHabit()        // 주행 끝 — 마지막 1분치 누적도 남긴다
     saveStyle()
@@ -677,33 +619,10 @@ class BleService : Service() {
     isErrorDialogShowing = true
 
     Log.w(tag, "[주의] 장치 오류 감지")
-    playVoiceFile("ERROR")
+    alerts.playVoice("ERROR")
     updateNotification("주의: 장치 오류 발생")
-    showHeadsUpNotification("장치 오류", "장치를 점검해주세요!")
+    alerts.showHeadsUp("장치 오류", "장치를 점검해주세요!")
     sendBroadcastToActivity("ACTION_MODULE_ERROR")
-  }
-
-  // ── RAW 원시 샘플 CSV 로깅 헬퍼 (Phase A) ──────────────────────────
-  // 모두 csvLock 아래에서 호출된다고 가정한다(호출부: writeRawCsv/flushRawCsv/closeCsvWriter).
-  // 최초 호출 시점에 세션 파일을 lazy 로 연다. 실패해도 판정 흐름은 계속되도록 예외를 삼킨다.
-  private fun ensureCsvWriterLocked(): java.io.BufferedWriter? {
-    if (csvClosed) return null   // 서비스 종료 후 도착한 콜백 → 새 세션 파일을 열지 않는다
-    csvWriter?.let { return it }
-    return try {
-      val dir = java.io.File(filesDir, "logs").apply { if (!exists()) mkdirs() }
-      val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-      val file = java.io.File(dir, "pedal_${ts}.csv")
-      java.io.BufferedWriter(java.io.FileWriter(file, true)).also {
-        it.write(
-          "date,time,brake,accel,module_err,pedal_err,accel_high,accel_rate,accel_score,armed,consecutive,label,persona,trial_id,trial_type,trial_phase,accel_median,speed_kmh,speed_acc_kmh,purpose\n"
-        )
-        csvWriter = it
-        Log.i(tag, "RAW 로깅 시작: ${file.absolutePath}")
-      }
-    } catch (e: Exception) {
-      Log.e(tag, "CSV 로깅 파일 생성 실패: ${e.message}", e)
-      null
-    }
   }
 
   private fun agPrefs() = getSharedPreferences("AgPrefs", MODE_PRIVATE)
@@ -866,7 +785,7 @@ class BleService : Service() {
   private fun announceJudgeStatus(wasFailed: Boolean) {
     if (judgeStatus == JudgeStatus.FAILED) {
       updateNotification("판정 오류 — 오조작 경고가 동작하지 않습니다")
-      showHeadsUpNotification("판정 오류", "지금은 페달 오조작 경고가 뜨지 않습니다")
+      alerts.showHeadsUp("판정 오류", "지금은 페달 오조작 경고가 뜨지 않습니다")
     } else if (wasFailed) {
       updateNotification(
         if (monitorState == MonitorState.MONITORING) "기기 연결됨 - 오조작 감지 중..." else "타겟 감시 중: $targetAddress"
@@ -924,7 +843,7 @@ class BleService : Service() {
 
       // 다른 앱으로 전환된 상태라 ACTION_CALIBRATION_DONE 브로드캐스트를 놓쳐도(§DataCollectActivity
       // onResume 재동기화로 화면은 커버됨) 완료 사실 자체는 시스템 알림으로 바로 알려준다(2026-07-14).
-      showHeadsUpNotification("PeOb", "브레이크 영점 조절이 완료되었습니다")
+      alerts.showHeadsUp("PeOb", "브레이크 영점 조절이 완료되었습니다")
 
       val intent = Intent(ACTION_CALIBRATION_DONE)
       intent.setPackage(packageName)
@@ -940,57 +859,24 @@ class BleService : Service() {
   private fun writeRawCsv(
     recvMs: Long, accel: Double, brake: Double, accelMedian: Double, label: Int, judged: JudgeResult?,
   ) {
-    synchronized(csvLock) {
-      val w = ensureCsvWriterLocked() ?: return
-      try {
-        val d = Date(recvMs)
-        // 0/1 대신 문자열로 남겨서 CSV를 열어봤을 때 바로 무슨 뜻인지 알 수 있게 한다.
-        val moduleErr = if (isErrorDialogShowing) "module_err" else "none"
-        // 경고가 실제로 발동한 그 윈도우 한 행에서만 "pedal_err".
-        val pedalErr = if (judged?.fired == true) "pedal_err" else "none"
-        val accelHighNow = currentAccelHigh
-        val accelHighStr = if (accelHighNow != null) String.format(Locale.US, "%.4f", accelHighNow) else "none"
-        val accelRateStr = judged?.let { String.format(Locale.US, "%.4f", it.rate) } ?: "none"
-        val accelScoreStr = judged?.let { String.format(Locale.US, "%.4f", it.score) } ?: "none"
-        val armedStr = judged?.armed?.toString() ?: "none"
-        val consecutiveStr = judged?.consecutive?.toString() ?: "none"
-        val purpose = if (CalibrationPrefs.isStyleDemo(agPrefs())) "demo" else "train"
-        val speed = speedTracker.current()
-        val speedStr = speed?.let { String.format(Locale.US, "%.1f", it.kmh) } ?: "none"
-        val speedAccStr = speed?.accuracyKmh?.let { String.format(Locale.US, "%.1f", it) } ?: "none"
-        // accel/brake 는 소수 4자리로 반올림(Q31 원본보다 촘촘할 필요 없음 → 줄 크기 안정).
-        w.write(
-          "${csvDateFormat.format(d)},${csvTimeFormat.format(d)}," +
-            "${String.format(Locale.US, "%.4f", brake)},${String.format(Locale.US, "%.4f", accel)}," +
-            "$moduleErr,$pedalErr,$accelHighStr,$accelRateStr,$accelScoreStr,$armedStr,$consecutiveStr," +
-            "$label,${currentPersona?.id ?: Persona.NONE_ID}," +
-            "${currentTrialId ?: "none"},${currentTrialType ?: "none"},${currentTrialPhase ?: "none"}," +
-            "${String.format(Locale.US, "%.4f", accelMedian)},$speedStr,$speedAccStr,$purpose\n"
-        )
-      } catch (e: Exception) {
-        Log.e(tag, "CSV 쓰기 실패: ${e.message}")
-      }
-    }
+    val speed = speedTracker.current()
+    csvLogger.write(
+      PedalCsvRow(
+        recvMs = recvMs, brake = brake, accel = accel,
+        moduleErr = isErrorDialogShowing,
+        pedalErr = judged?.fired == true,   // 경고가 실제로 발동한 그 윈도우 한 행에서만
+        accelHigh = currentAccelHigh,
+        accelRate = judged?.rate, accelScore = judged?.score, armed = judged?.armed, consecutive = judged?.consecutive,
+        label = label, persona = currentPersona?.id ?: Persona.NONE_ID,
+        trialId = currentTrialId, trialType = currentTrialType, trialPhase = currentTrialPhase,
+        accelMedian = accelMedian, speedKmh = speed?.kmh, speedAccKmh = speed?.accuracyKmh,
+        demo = CalibrationPrefs.isStyleDemo(agPrefs()),
+      )
+    )
   }
 
-  private fun flushRawCsv() {
-    synchronized(csvLock) {
-      try { csvWriter?.flush() } catch (e: Exception) { Log.w(tag, "CSV flush 실패: ${e.message}") }
-    }
-  }
-
-  private fun closeCsvWriter() {
-    synchronized(csvLock) {
-      try {
-        csvWriter?.flush()
-        csvWriter?.close()
-      } catch (e: Exception) {
-        Log.w(tag, "CSV 닫기 실패: ${e.message}")
-      }
-      csvWriter = null
-      csvClosed = true
-    }
-  }
+  // handleRawData(BLE 수신 처리)를 건드리지 않으려고 호출 이름을 유지한다
+  private fun flushRawCsv() = csvLogger.flush()
 
   // ── 기기 -> 폰 raw 바이너리 처리 (엑셀/페달 오조작 로컬 판단 입력부) ──────────
   // 50Hz 로 들어오는 배치 프레임(count + RawSample×N)을 디코딩해 윈도우에 쌓고,
@@ -1156,102 +1042,25 @@ class BleService : Service() {
   // 페달 오조작 감지 시 경고 트리거 (fullScreenIntent로 CriticalActivity 강제 실행)
   private fun onPedalMisoperation() {
     Log.w(tag, "[경고] 페달 오조작 감지")
-    playVoiceFile("PEDAL")
+    alerts.playVoice("PEDAL")
     updateNotification("주의: 페달 오조작 감지")
-    showCriticalNotification("위험! 페달 오조작!", "즉시 브레이크를 확인하세요!")
-
-    // fullScreenIntent는 화면이 꺼져있거나 잠겨있을 때만 자동 실행되고,
-    // 화면을 보고 있는 상태(포그라운드)에서는 배너 알림으로만 뜬다.
-    // 오조작은 화면을 보고 있는 상태에서도 무조건 전환돼야 하므로 직접 실행도 병행한다.
-    val forceIntent = Intent(this, CriticalActivity::class.java)
-    forceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    startActivity(forceIntent)
-  }
-
-  private fun playVoiceFile(type: String) {
-    // 저장된 성별 확인
-    val prefs = getSharedPreferences("AgPrefs", MODE_PRIVATE)
-    val gender = prefs.getString("TTS_GENDER", "female") ?: "female"
-
-    // 상황과 성별에 맞는 MP3 파일 ID 찾기
-    var soundResId = 0
-
-    if (gender == "male") {
-      // 남성일 때 파일 매칭
-      soundResId = when(type) {
-        "PEDAL" -> R.raw.voice_pedal_male
-        "SD" -> R.raw.voice_sd_male
-        "ERROR" -> R.raw.voice_error_male
-        else -> 0
-      }
-    } else {
-      // 여성일 때 파일 매칭
-      soundResId = when(type) {
-        "PEDAL" -> R.raw.voice_pedal_female
-        "SD" -> R.raw.voice_sd_female
-        "ERROR" -> R.raw.voice_error_female
-        else -> 0
-      }
-    }
-
-    // 재생 (파일이 존재할 경우만)
-    if (soundResId != 0) {
-      try {
-        // MediaPlayer 생성 및 재생
-        val mediaPlayer = android.media.MediaPlayer.create(this, soundResId)
-        mediaPlayer.setOnCompletionListener {
-          it.release() // 재생 끝나면 메모리 청소
-        }
-        mediaPlayer.start()
-      } catch (e: Exception) {
-        Log.e(tag, "MP3 재생 실패: ${e.message}")
-      }
-    }
+    alerts.showCritical("위험! 페달 오조작!", "즉시 브레이크를 확인하세요!")   // 전체화면 경고(알림 + 직접 실행)
   }
 
   private fun startForegroundServiceNotification(content: String) {
-    val notification = createNotification(content)
+    val notification = alerts.ongoingNotification(content)
     if (Build.VERSION.SDK_INT >= 34) {
       // location 타입은 위치 권한이 있을 때만 — 권한 없이 선언하면 Android 14+ 에서 SecurityException.
       var type = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
       if (speedTracker.hasPermission()) type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-      startForeground(1, notification, type)
+      startForeground(SafetyAlerts.ONGOING_ID, notification, type)
     } else {
-      startForeground(1, notification)
+      startForeground(SafetyAlerts.ONGOING_ID, notification)
     }
   }
 
-  private fun updateNotification(content: String) {
-    val manager = getSystemService(NotificationManager::class.java)
-    manager.notify(1, createNotification(content))
-  }
-
-  private fun createNotification(content: String): Notification {
-    return NotificationCompat.Builder(this, channelId)
-      .setContentTitle("PeOb")
-      .setContentText(content)
-      .setSmallIcon(android.R.drawable.ic_dialog_info)
-      .setContentIntent(getPendingIntent())
-      .setOngoing(true)
-      .build()
-  }
-
-  private fun createNotificationChannel() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      // IMPORTANCE_LOW -> IMPORTANCE_HIGH 헤드업 알림 필수 조건!
-      val serviceChannel = NotificationChannel(
-        channelId,
-        "PeOb Safety Channel",
-        NotificationManager.IMPORTANCE_HIGH
-      )
-
-      // 알림 올 때 진동 Feedback
-      serviceChannel.enableVibration(true)
-      serviceChannel.description = "안전 장비의 긴급 경고를 알립니다."
-
-      getSystemService(NotificationManager::class.java).createNotificationChannel(serviceChannel)
-    }
-  }
+  // 상단 고정 알림 문구 교체 — BLE 연결 콜백(onConnectionStateChange)의 호출부를 건드리지 않으려고 이름을 유지한다
+  private fun updateNotification(content: String) = alerts.updateOngoing(content)
 
   @SuppressLint("MissingPermission")
   private fun disconnectGatt() {
@@ -1346,61 +1155,5 @@ class BleService : Service() {
     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
       stopSelf()
     }, 500)
-  }
-
-  private fun showHeadsUpNotification(title: String, content: String) {
-    val manager = getSystemService(NotificationManager::class.java)
-
-    val notification = NotificationCompat.Builder(this, channelId)
-      .setContentTitle(title)
-      .setContentText(content)
-      .setSmallIcon(android.R.drawable.stat_sys_warning) // 경고 아이콘
-      .setPriority(NotificationCompat.PRIORITY_HIGH) // 중요도 최상
-      .setDefaults(Notification.DEFAULT_ALL) // 소리/진동 기본값 사용
-      .setAutoCancel(true) // 터치하면 사라짐
-      .setContentIntent(getPendingIntent())
-      .build()
-
-    // 중요: ID를 1번(서비스용)과 다르게 999번(경고용)으로 줍니다.
-    manager.notify(999, notification)
-  }
-
-  // CriticalActivity를 깨우는 비상 알림 함수 (fullScreenIntent로 강제 전체화면 전환)
-  private fun showCriticalNotification(title: String, content: String) {
-    val manager = getSystemService(NotificationManager::class.java)
-
-    val fullScreenIntent = Intent(this, CriticalActivity::class.java)
-    fullScreenIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-
-    val fullScreenPendingIntent = PendingIntent.getActivity(
-      this,
-      999,
-      fullScreenIntent,
-      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
-
-    val builder = NotificationCompat.Builder(this, channelId)
-      .setSmallIcon(android.R.drawable.stat_sys_warning)
-      .setContentTitle(title)
-      .setContentText(content)
-      .setPriority(NotificationCompat.PRIORITY_HIGH)
-      .setCategory(NotificationCompat.CATEGORY_ALARM)
-      .setFullScreenIntent(fullScreenPendingIntent, true)
-      .setAutoCancel(true)
-      .build()
-
-    manager.notify(888, builder)
-  }
-
-  private fun getPendingIntent(): PendingIntent? {
-    val intent = Intent(this, MainActivity::class.java)
-    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-
-    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-      PendingIntent.FLAG_IMMUTABLE
-    } else {
-      PendingIntent.FLAG_UPDATE_CURRENT
-    }
-    return PendingIntent.getActivity(this,0, intent, flags)
   }
 }
